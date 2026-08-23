@@ -1,0 +1,25 @@
+# Local config pack for COSMIC. Each top-level dir here is a cosmic_config entry
+# laid out as one RON file per field (e.g. .../Light.Builder/v2/palette). Edit a
+# field file then re-run `just install` here to reinstall it to the live config.
+
+# Installs to the live user config. Each entry is rewritten file-by-file using the
+# same convention cosmic-config uses for its own writes: write a .atomicwrite temp
+# in the target dir, then rename over the field file. The daemon and libcosmic
+# inotify watchers skip .atomicwrite temps and re-read the completed data event.
+#
+# Do NOT swap whole entry dirs (mv --exchange/renameat2): inotify pins inodes, so
+# every existing watcher keeps pointing at the grandparented old tree and theme
+# changes become invisible, leaving consumers stuck on a stale light/dark mix.
+install:
+    #!/usr/bin/env sh
+    cd "{{ justfile_directory() }}"
+    dest="/home/dev/.config/cosmic"
+    mkdir -p "$dest"
+    find com.system76.* -type f | while IFS= read -r f; do
+        d="$(dirname "$f")"
+        b="$(basename "$f")"
+        mkdir -p "$dest/$d"
+        tmp="$dest/$d/.atomicwrite.$b"
+        cat "$f" > "$tmp" && mv "$tmp" "$dest/$f"
+    done
+    echo "Installed theme pack to $dest"

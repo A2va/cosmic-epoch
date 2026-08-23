@@ -164,6 +164,10 @@ reset *subs:
         git submodule update --init --force --checkout "$s"
     done
 
+# Local config/theme pack lives in cosmic-config/ (its own justfile). `just config` == `just cosmic-config/install`.
+config:
+    {{ just }} cosmic-config/install
+
 install rootdir="" prefix="/usr/local": build
     {{ just }} rootdir={{rootdir}} prefix={{prefix}} cosmic-applets/install
     {{ just }} rootdir={{rootdir}} prefix={{prefix}} cosmic-applibrary/install
@@ -190,8 +194,9 @@ install rootdir="" prefix="/usr/local": build
     {{ just }} rootdir={{rootdir}} prefix={{prefix}} cosmic-term/install
     {{ make }} -C cosmic-wallpapers install DESTDIR={{rootdir}} prefix={{prefix}}
     {{ make }} -C cosmic-workspaces-epoch install DESTDIR={{rootdir}} prefix={{prefix}}
-    {{ just }} rootdir={{rootdir}} pop-launcher/install
+    {{ just }} rootdir={{rootdir}} prefix={{prefix}} pop-launcher/install
     {{ make }} -C xdg-desktop-portal-cosmic install DESTDIR={{rootdir}} prefix={{prefix}}
+    {{ just }} cosmic-config/install
 
 _mkdir dir:
    mkdir -p dir
