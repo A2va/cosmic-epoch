@@ -1,0 +1,38 @@
+{
+  "name": "cosmic-epoch",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+  },
+  "remoteUser": "dev",
+  // Boot systemd as PID 1 (the Dockerfile CMD). tini must not wrap init.
+  "overrideCommand": false,
+  "init": false,
+  "runArgs": [
+    "--security-opt=label=disable",
+    "--tmpfs=/run",
+    "--tmpfs=/run/lock",
+    "--tmpfs=/tmp:rw,nosuid,exec",
+    "--cgroupns=host",
+    "--stop-signal=SIGRTMIN+3",
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/cosmic-epoch,type=bind",
+  "workspaceFolder": "/cosmic-epoch",
+  "mounts": [
+    "source=/sys/fs/cgroup,target=/sys/fs/cgroup,type=bind",
+    "source=${localEnv:XDG_RUNTIME_DIR},target=/run/host-user,type=bind",
+    "source=cosmic-cargo,target=/home/dev/.cargo,type=volume",
+  ],
+  "containerEnv": {
+    "CARGO_HOME": "/home/dev/.cargo",
+    "RUSTUP_HOME": "/usr/local/share/rustup",
+    "container": "docker",
+  },
+  "remoteEnv": {
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "XDG_RUNTIME_DIR": "/run/host-user",
+    "JUST_RUNTIME_DIR": "/home/dev/.cache/just",
+  },
+  "postCreateCommand": ["sudo", "chown", "-R", "dev:dev", "/home/dev/.cargo"],
+}
