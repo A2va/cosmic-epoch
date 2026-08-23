@@ -1,0 +1,25 @@
+{
+  "name": "cosmic-epoch",
+  "build": {
+    "dockerfile": "../container/Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "dev",
+  "runArgs": ["--security-opt=label=disable"],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/cosmic-epoch,type=bind",
+  "workspaceFolder": "/cosmic-epoch",
+  "mounts": [
+    "source=${localEnv:XDG_RUNTIME_DIR},target=/run/user/1000,type=bind",
+    "source=cosmic-cargo,target=/home/dev/.cargo,type=volume"
+  ],
+  "containerEnv": {
+    "CARGO_HOME": "/home/dev/.cargo",
+    "RUSTUP_HOME": "/usr/local/share/rustup"
+  },
+  "remoteEnv": {
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "XDG_RUNTIME_DIR": "/run/user/1000"
+  },
+  "postCreateCommand": "chown -R dev:dev /home/dev/.cargo"
+}

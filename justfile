@@ -31,6 +31,127 @@ build:
     {{ just }} pop-launcher/build-release
     {{ make }} -C xdg-desktop-portal-cosmic all
 
+# Build only listed submodules, e.g. just c cosmic-files cosmic-comp
+# (empty = everything). DEBUG=1 by default; DEBUG=0 for release.
+# Projects without a debug knob (cosmic-panel, cosmic-session) stay release-only.
+# ponytail: just <1.22 doesn't pass args to shebang recipes; interpolate instead
+c *components:
+    #!/usr/bin/env sh
+    set -e
+    d="${DEBUG:-1}"
+    set -- {{ components }}
+    [ $# -gt 0 ] || exec {{ just }} build
+    for c in "$@"; do
+        if [ ! -d "$c" ]; then echo "skipping unknown component: $c" >&2; continue; fi
+        # ponytail: pop-launcher's CLI defines '-m' twice; clap's debug_assert
+        # (compiled only in debug builds) panics on it, so keep it release-only
+        dd="$d"; [ "$c" = pop-launcher ] && dd=0
+        jf=""
+        for f in justfile Justfile; do
+            if [ -f "$c/$f" ]; then jf="$c/$f"; break; fi
+        done
+        if [ -n "$jf" ]; then
+            # 'build-release' hardcodes --release upstream; a debug build must
+            # call build-debug explicitly (the debug var only affects install paths)
+            if [ "$dd" = 1 ] && grep -qE '^debug *:=' "$jf" && grep -q '^build-debug' "$jf"; then
+                (cd "$c" && {{ just }} debug=1 build-debug)
+            elif grep -q '^build-release' "$jf"; then
+                (cd "$c" && {{ just }} build-release)
+            fi # else data-only, e.g. cosmic-icons
+        elif [ -f "$c/Makefile" ] && grep -q '^DEBUG' "$c/Makefile"; then
+            {{ make }} -C "$c" "DEBUG=$d" all
+        else
+            {{ make }} -C "$c" all
+        fi
+    done
+
+# Install only listed submodules, e.g. just ci cosmic-icons cosmic-files
+ci *components:
+    #!/usr/bin/env sh
+    set -e
+    d="${DEBUG:-1}"
+    set -- {{ components }}
+    [ $# -gt 0 ] || exec {{ just }} install
+    for c in "$@"; do
+        if [ ! -d "$c" ]; then echo "skipping unknown component: $c" >&2; continue; fi
+        # ponytail: pop-launcher's CLI defines '-m' twice; clap's debug_assert
+        # (compiled only in debug builds) panics on it, so keep it release-only
+        dd="$d"; [ "$c" = pop-launcher ] && dd=0
+        jf=""
+        for f in justfile Justfile; do
+            if [ -f "$c/$f" ]; then jf="$c/$f"; break; fi
+        done
+        if [ -n "$jf" ]; then
+            # ponytail: some justfiles (cosmic-launcher) hardcode a literal
+            # 'debug'/bin path that ignores CARGO_TARGET_DIR; symlink so the
+            # install finds the real artifact without editing the submodule
+            if grep -qE '^debug *:=' "$jf"; then
+                (cd "$c" && ln -sfn target/debug debug && ln -sfn target/release release \
+                          && HOME=/home/dev {{ just }} "debug=$dd" install)
+            elif [ "$dd" = 1 ] && [ -f "$c/target/debug/$c" ]; then
+                # ponytail: knob-less justfiles hardcode 'release' in bin-src;
+                # override the vars with debug artifacts when they exist
+                o="bin-src=target/debug/$c"
+                [ -f "$c/target/debug/$c-daemon" ] && o="$o daemon-src=target/debug/$c-daemon"
+                (cd "$c" && HOME=/home/dev {{ just }} $o install)
+            else
+                (cd "$c" && HOME=/home/dev {{ just }} install)
+            fi
+        elif [ -f "$c/Makefile" ] && grep -q '^DEBUG' "$c/Makefile"; then
+            # ponytail: sudo sets HOME=/root, but pop-launcher installs into
+            # $HOME/.local; point it at the dev user so the session can find it
+            HOME=/home/dev {{ make }} -C "$c" "DEBUG=$d" install DESTDIR="${COSMIC_ROOTDIR:-}" prefix="${COSMIC_PREFIX:-/usr/local}"
+        else
+            HOME=/home/dev {{ make }} -C "$c" install DESTDIR="${COSMIC_ROOTDIR:-}" prefix="${COSMIC_PREFIX:-/usr/local}"
+        fi
+    done
+    # ponytail: icon themes need a cache or launchers/panel buttons render blank;
+    # rebuild after installs (cosmic-icons adds the Cosmic theme at runtime)
+    gtk-update-icon-cache -f /usr/share/icons/Cosmic 2>/dev/null || true
+    gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
+# Clean only listed submodules, e.g. just cl cosmic-comp (empty = everything)
+cl *components:
+    #!/usr/bin/env sh
+    set -e
+    set -- {{ components }}
+    [ $# -gt 0 ] || exec {{ just }} clean
+    for c in "$@"; do (
+        cd "$c" || continue
+        jf=""
+        for f in justfile Justfile; do
+            if [ -f "$f" ]; then jf="$f"; break; fi
+        done
+        if [ -n "$jf" ]; then
+            # ponytail: dry-run detects the recipe; grepping for 'clean:' also
+            # matches the 'clean := x' variable naming pattern used upstream
+            if {{ just }} -n clean >/dev/null 2>&1; then
+                {{ just }} clean
+            elif [ -f Cargo.toml ]; then
+                cargo clean
+            fi
+        elif [ -f Makefile ]; then
+            {{ make }} clean
+        fi
+    ); done
+
+# Reset one or more submodules to the commit pinned by the superproject (the
+# "release" state), discarding local edits. No args = reset all submodules.
+# e.g. just reset cosmic-settings-daemon cosmic-files
+reset *subs:
+    #!/usr/bin/env sh
+    set -e
+    set -- {{ subs }}
+    [ $# -gt 0 ] || set -- $(git submodule status | awk '{print $2}')
+    for s in "$@"; do
+        [ -e "$s" ] || { echo "skip (not a submodule): $s" >&2; continue; }
+        # ponytail: fetch all remotes (origin may be a fork, upstream = pop-os) so the
+        # pinned commit is reachable; non-fatal if offline
+        git -C "$s" fetch --all -q 2>/dev/null || true
+        echo "reset $s -> superproject pinned commit"
+        git submodule update --init --force --checkout "$s"
+    done
+
 install rootdir="" prefix="/usr/local": build
     {{ just }} rootdir={{rootdir}} prefix={{prefix}} cosmic-applets/install
     {{ just }} rootdir={{rootdir}} prefix={{prefix}} cosmic-applibrary/install
