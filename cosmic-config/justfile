@@ -1,0 +1,18 @@
+# Local theme pack for COSMIC. Each entry under com.system76.CosmicTheme.* is a
+# cosmic_config entry laid out as one RON file per field (e.g. .../Light.Builder/v2/palette).
+# Edit a field file (e.g. com.system76.CosmicTheme.Light.Builder/v2/bg_color) then re-run
+# `just theme` (root) or `just install` here to reinstall as the system-default themes.
+
+install:
+    #!/usr/bin/env sh
+    # ponytail: just does not cd into this justfile's dir for path-prefixed recipes,
+    # so cd explicitly via justfile_directory() before globbing the entry dirs
+    cd "{{ justfile_directory() }}"
+    dest="/usr/share/cosmic"
+    for d in com.system76.CosmicTheme.*; do
+        name="$(basename "$d")"
+        rm -rf "$dest/$name"
+        find "$d" -type f | while read -r f; do
+            install -Dm0644 "$f" "$dest/$f"
+        done
+    done
