@@ -21,12 +21,13 @@ RUN apt-get install -y --no-install-recommends \
       libflatpak-dev
 
 # --- Runtime / script dependencies: boot & drive COSMIC inside the image ---
+# systemd (already in the ubuntu base fs) runs as PID 1 for `dev.sh dm` —
+# real dbus.service, journald and systemd-logind instead of hand-rolled stubs.
 RUN apt-get install -y --no-install-recommends \
       dbus dbus-user-session \
       greetd \
       gtk-update-icon-cache hicolor-icon-theme \
       pipewire pipewire-bin \
-      python3-dbus python3-gi \
       fonts-dejavu-core wl-clipboard \
  && rm -rf /var/lib/apt/lists/*
 
@@ -35,6 +36,14 @@ RUN usermod -l dev -d /home/dev -m ubuntu \
  && groupmod -n dev ubuntu \
  && echo 'dev ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/dev
 
+# greetd's deb enables itself as display-manager.service; it would crash-loop
+# at boot (no kernel VTs in a container). scripts/inside-dm.sh points
+# the display-manager alias at cosmic-greeter.service instead.
+RUN rm -f /etc/systemd/system/display-manager.service
+
+# Normally created at boot by systemd-sysusers from cosmic-greeter.sysusers;
+# /etc is not image-writable in a running container, so create the user here
+# instead (same fields as the sysusers file).
 RUN useradd \
     --system \
     --user-group \
@@ -56,4 +65,6 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
  && chmod -R a+rX /usr/local/share/mise /usr/local/share/rustup /usr/local/share/cargo
 
 WORKDIR /cosmic-epoch
-CMD ["bash"]
+# systemd as PID 1 by default: the devcontainer (overrideCommand: false) and
+# scripts/dev.sh boot a real init; a shell is one exec away.
+CMD ["/sbin/init"]
