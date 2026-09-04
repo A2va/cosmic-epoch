@@ -1,0 +1,9 @@
+(
+    rules: "",
+    model: "pc105",
+    layout: "ch,ch",
+    variant: "fr,fr_nodeadkeys",
+    options: Some(",lv3:lalt_switch"),
+    repeat_delay: 600,
+    repeat_rate: 25,
+)

@@ -71,6 +71,44 @@ else
     die "set WAYLAND_DISPLAY or DISPLAY so GUIs can open on your host"
 fi
 
+# Nested cosmic-comp defaults to US English, so typing mismatches the host.
+# Detect the host layout (explicit XKB_DEFAULT_* wins per variable) and
+# publish it as a config-pack entry; `just config` deploys it to
+# /home/dev/.config/cosmic. Override e.g.:
+#   XKB_DEFAULT_LAYOUT=de XKB_DEFAULT_VARIANT=nodeadkeys scripts/dev.sh de
+_host_status="$(localectl status --no-pager 2>/dev/null || true)"
+_pick_xkb() { printf '%s\n' "$_host_status" | sed -n "s/.*$1:[[:space:]]*//p" | tr -d ' ' | sed -e 's/^n\/a$//'; }
+: "${XKB_DEFAULT_LAYOUT:=$(_pick_xkb 'X11 Layout')}"
+: "${XKB_DEFAULT_MODEL:=$(_pick_xkb 'X11 Model')}"
+: "${XKB_DEFAULT_VARIANT:=$(_pick_xkb 'X11 Variant')}"
+: "${XKB_DEFAULT_OPTIONS:=$(_pick_xkb 'X11 Options')}"
+unset -f _pick_xkb
+if [ -z "${XKB_DEFAULT_LAYOUT:-}" ] && [ -f /etc/default/keyboard ]; then
+    _kb() { sed -n "s/^$1=//p" /etc/default/keyboard 2>/dev/null | tr -d '" ' | head -n1; }
+    XKB_DEFAULT_LAYOUT="$(_kb XKBLAYOUT)"; XKB_DEFAULT_MODEL="$(_kb XKBMODEL)"
+    XKB_DEFAULT_VARIANT="$(_kb XKBVARIANT)"; XKB_DEFAULT_OPTIONS="$(_kb XKBOPTIONS)"
+    unset -f _kb
+fi
+unset _host_status
+
+# Publish the host layout as a config-pack entry (values come from the host's
+# own localed, so the xkb token charset needs no escaping). The pack deploys
+# file-by-file to /home/dev/.config/cosmic via `just config`, using
+# atomic-write+rename that the inotify watchers expect. Regenerated every run;
+# removed when undetectable so a stale layout never lingers. This dir is
+# gitignored generated output — never commit it.
+PACK_XKB="cosmic-config/com.system76.CosmicComp/v1/xkb_config"
+if [ -n "${XKB_DEFAULT_LAYOUT:-}" ]; then
+    _opt="None"; [ -n "${XKB_DEFAULT_OPTIONS:-}" ] && _opt="Some(\"${XKB_DEFAULT_OPTIONS}\")"
+    mkdir -p "$(dirname "$PACK_XKB")"
+    printf '(\n    rules: "",\n    model: "%s",\n    layout: "%s",\n    variant: "%s",\n    options: %s,\n    repeat_delay: 600,\n    repeat_rate: 25,\n)\n' \
+        "${XKB_DEFAULT_MODEL:-}" "${XKB_DEFAULT_LAYOUT}" "${XKB_DEFAULT_VARIANT:-}" "$_opt" > "$PACK_XKB"
+    unset _opt
+else
+    rm -rf cosmic-config/com.system76.CosmicComp
+fi
+unset PACK_XKB
+
 [ -d /dev/dri ] && RUNARGS+=(--device /dev/dri) # absent = software rendering
 
 # CARGO_HOME (the registry download cache) lives in the container's
@@ -130,6 +168,7 @@ de)
     echo "systemd container up (state: $state). Then:"
     echo "  just c $DE_COMPONENTS"
     echo "  sudo just ci $DE_COMPONENTS"
+    echo "  sudo -u dev just config"
     echo "  ./scripts/inside-de.sh"
     "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
     ;;
@@ -137,6 +176,7 @@ dm)
     echo "systemd container up (state: $state). Then:"
     echo "  just c $DM_COMPONENTS"
     echo "  sudo just ci $DM_COMPONENTS"
+    echo "  sudo -u dev just config"
     echo "  ./scripts/inside-dm.sh"
     "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
     ;;
