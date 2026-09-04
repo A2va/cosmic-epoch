@@ -109,12 +109,11 @@ done
 # Best-effort live import in case the manager is already running; remove the
 # file when unset so a previous debug run doesn't leak into the next one.
 if [ -n "${RUST_LOG:-}${RUST_BACKTRACE:-}" ]; then
-    sudo install -d -o dev -g dev /home/dev/.config/environment.d
+    sudo mkdir -p /home/dev/.config/environment.d
     {
         [ -n "${RUST_LOG:-}" ] && printf 'RUST_LOG=%s\n' "$RUST_LOG"
         [ -n "${RUST_BACKTRACE:-}" ] && printf 'RUST_BACKTRACE=%s\n' "$RUST_BACKTRACE"
     } | sudo tee /home/dev/.config/environment.d/10-debug.conf >/dev/null
-    sudo chown dev:dev /home/dev/.config/environment.d/10-debug.conf
     if [ -S /run/user/1000/bus ]; then
         sudo -u dev env XDG_RUNTIME_DIR=/run/user/1000 \
                 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
@@ -207,6 +206,12 @@ sudo cp cosmic-greeter/debian/cosmic-greeter.service \
 ## systemd-tmpfiles-setup.service does this before any unit starts.
 sudo systemctl kill -s HUP dbus.service 2>/dev/null || true
 sudo systemd-tmpfiles create 2>/dev/null || true
+
+# `just ci` runs as root with HOME=/home/dev, leaving root-owned files under
+# dev's home; dev-run daemons then can't create their config dirs and
+# crash-loop with PermissionDenied. Reclaim (same as justfile's post-install
+# chown) so already-broken homes are repaired on every run.
+sudo chown -R dev:dev /home/dev/.config /home/dev/.local 2>/dev/null || true
 
 ## Same task-budget fix as inside-de.sh: the session's applet burst can exceed
 ## user-1000.slice's stock TasksMax (675), failing thread spawn with EAGAIN.

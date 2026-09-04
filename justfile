@@ -114,9 +114,9 @@ ci *components:
         fi
     done
     # sudo installs (pop-launcher et al) drop root-owned files into dev's
-    # home; reclaim them or dev-run daemons can't create their state dirs
-    # (~/.local/state) and crash-loop with PermissionDenied
-    [ "$(id -u)" = 0 ] && chown -R dev:dev /home/dev/.local || true
+    # home; reclaim them or dev-run daemons can't create their config/state dirs
+    # (~/.config/cosmic, ~/.local/state) and crash-loop with PermissionDenied
+    [ "$(id -u)" = 0 ] && chown -R dev:dev /home/dev/.config /home/dev/.local || true
     # icon themes need a cache or launchers/panel buttons render blank
     # rebuild after installs (cosmic-icons adds the Cosmic theme at runtime)
     gtk-update-icon-cache -f /usr/share/icons/Cosmic 2>/dev/null || true

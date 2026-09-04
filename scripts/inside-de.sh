@@ -49,6 +49,12 @@ done
 [ -S /run/user/1000/bus ] || die "dev user bus didn't come up —
 run 'scripts/dev.sh dm' once, or 'loginctl enable-linger dev' manually"
 
+# `just ci` runs as root with HOME=/home/dev, leaving root-owned files under
+# dev's home; dev-run daemons then can't create their config dirs and
+# crash-loop with PermissionDenied. Reclaim (same as justfile's post-install
+# chown) so already-broken homes are repaired on every run.
+sudo chown -R dev:dev /home/dev/.config /home/dev/.local 2>/dev/null || true
+
 ## Fresh budget, fresh start. Two task caps bite here, and orphans from a run
 ## that died without cleanup eat both, so applet threads fail with EAGAIN:
 ##  - user-1000.slice TasksMax (stock 675): raised via set-property. NB it's a
