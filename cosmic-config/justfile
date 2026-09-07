@@ -22,4 +22,7 @@ install:
         tmp="$dest/$d/.atomicwrite.$b"
         cat "$f" > "$tmp" && mv "$tmp" "$dest/$f"
     done
+    # When run via sudo, files land in dev's home owned by root; reclaim them
+    # or dev-run daemons can't write their config and crash-loop.
+    [ "$(id -u)" = 0 ] && chown -R dev:dev "$dest"
     echo "Installed theme pack to $dest"

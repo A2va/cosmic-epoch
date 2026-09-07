@@ -87,7 +87,7 @@ ci *components:
             if grep -qE '^debug *:=' "$jf"; then
                 (cd "$c" && ln -sfn target/debug debug && ln -sfn target/release release \
                           && HOME=/home/dev {{ just }} "debug=$dd" install)
-            elif [ "$dd" = 1 ]; then
+            elif [ "$dd" = 1 ] && grep -qE '^bin-src *:=' "$jf"; then
                 # knob-less justfiles hardcode 'release' in bin-src; override
                 # with the debug artifact when it exists. The binary name is
                 # not always the dir name (cosmic-applibrary -> cosmic-app-library),
@@ -117,6 +117,19 @@ ci *components:
     # home; reclaim them or dev-run daemons can't create their config/state dirs
     # (~/.config/cosmic, ~/.local/state) and crash-loop with PermissionDenied
     [ "$(id -u)" = 0 ] && chown -R dev:dev /home/dev/.config /home/dev/.local || true
+    # cosmic-greeter also ships the DM assets the deb package would install:
+    # units, tmpfiles fragment, and the PAM stack for the service named in
+    # greetd.toml — trimmed of what the container's mlockall() worker can't
+    # fit (see .devcontainer/Dockerfile) and pointed at /etc/environment
+    # (its /etc/default/locale line is fine now, but pam_env reads the host
+    # display from here).
+    if [ "$(id -u)" = 0 ] && [ -d cosmic-greeter ] && printf '%s' "$*" | grep -qw cosmic-greeter; then
+        install -Dm0644 cosmic-greeter/debian/cosmic-greeter.service /lib/systemd/system/cosmic-greeter.service
+        install -Dm0644 cosmic-greeter/debian/cosmic-greeter-daemon.service /lib/systemd/system/cosmic-greeter-daemon.service
+        install -Dm0644 cosmic-greeter/debian/cosmic-greeter.pam /etc/pam.d/cosmic-greeter
+        sed -i -e '/pam_limits\.so/d' -e '/pam_selinux\.so/d' -e '/pam_gnome_keyring\.so/d' /etc/pam.d/cosmic-greeter
+        ln -sf /lib/systemd/system/cosmic-greeter.service /etc/systemd/system/display-manager.service
+    fi
     # icon themes need a cache or launchers/panel buttons render blank
     # rebuild after installs (cosmic-icons adds the Cosmic theme at runtime)
     gtk-update-icon-cache -f /usr/share/icons/Cosmic 2>/dev/null || true
