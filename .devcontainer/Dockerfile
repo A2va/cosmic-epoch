@@ -62,15 +62,19 @@ RUN useradd \
 
 # --- Static session config: everything inside-de/inside-dm need that does ---
 # --- not depend on the mounted repo or the host display. --------------------
-# Task caps: a cosmic session's panel + ~19 applets share one scope and burst
-# past the stock DefaultTasksMax (307) and user-UID.slice TasksMax (675),
-# failing thread spawn with EAGAIN. The user-.slice drop-in is on the
-# template so it applies no matter when the slice first appears.
+# Task caps: a cosmic session bursts past the stock TasksMax in three places
+# (EAGAIN spawning applet threads): the system manager default (307 — covers
+# init.scope, where podman-exec'd sessions live, AND the greeter's cosmic-comp
+# under cosmic-greeter.service), the user-UID.slice (675 — user-.slice
+# drop-in on the template so it applies no matter when the slice appears),
+# and the user manager's DefaultTasksMax (307 — inherited by every
+# cosmic-*.scope; panel + ~19 applets share one scope).
 # dev's user manager must be up before any session starts (inside-de waits
 # for its bus); linger at boot instead of a runtime enable-linger race.
-RUN install -d /etc/systemd/system/user-.slice.d /etc/systemd/user.conf.d \
+RUN install -d /etc/systemd/system/user-.slice.d /etc/systemd/user.conf.d /etc/systemd/system.conf.d \
  && printf '[Slice]\nTasksMax=4096\n' > /etc/systemd/system/user-.slice.d/10-tasks.conf \
  && printf '[Manager]\nDefaultTasksMax=4096\n' > /etc/systemd/user.conf.d/10-tasks.conf \
+ && printf '[Manager]\nDefaultTasksMax=4096\n' > /etc/systemd/system.conf.d/10-tasks.conf \
  && mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/dev
 
 # greetd greeter session, static parts (the per-run host display is appended
