@@ -1,0 +1,54 @@
+# Dev toolchain: rust toolchain (clippy is part of rustup's 'rust' component) and just.
+# The devcontainer Dockerfile installs these same tools via mise at build time.
+[tools]
+rust = { version = "latest", components = "rustfmt,clippy" }
+just = "latest"
+
+# COSMIC components compiled/installed by the dev tasks (build order).
+# DE sessions: greedy tasks that want compile+install as one unit are separate.
+[env]
+COMPONENTS_DE = "cosmic-comp cosmic-session cosmic-panel cosmic-applets cosmic-applibrary cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
+COMPONENTS_DM = "{{env.COMPONENTS_DE}} cosmic-greeter"
+
+[tasks.enter]
+description = "Dev container: graphical = bash session (reuses running container; de/dm also just enter — start sessions with 'mise run de|dm' inside); VT = session test (de|dm run the matching session script)"
+raw = true
+run = """
+./scripts/enter.sh "$@"
+"""
+
+[tasks.de]
+description = "Run the COSMIC session on the host compositor — inside the dev container (host terminal: 'mise run enter' first)"
+raw = true
+run = "./scripts/inside-de.sh \"$@\""
+
+[tasks.dm]
+description = "Run the COSMIC greeter — inside the dev container (host terminal: 'mise run enter' first; real-VT greeter: 'mise run enter dm')"
+raw = true
+run = "./scripts/inside-dm.sh \"$@\""
+
+[tasks.app]
+description = "Run a built COSMIC binary/app as a window on the host compositor"
+raw = true
+run = """
+./scripts/app.sh "$@"
+"""
+
+[tasks.compile]
+description = "Build COSMIC components (debug). DEBUG=0 release. Nothing = all components"
+raw = true
+run = """
+./scripts/compile.sh "$@"
+"""
+
+[tasks.install]
+description = "Install COSMIC components into the dev container (container only). Nothing = all DE + config pack; arg 'dm' = DM set"
+raw = true
+run = """
+./scripts/install.sh "$@"
+"""
+
+[tasks.stop]
+description = "Stop a running COSMIC session (container keeps running; --rm also removes the container)"
+raw = true
+run = './scripts/stop-session.sh "$@"'

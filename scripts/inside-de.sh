@@ -1,11 +1,85 @@
 #!/usr/bin/env bash
-# Nested COSMIC session as dev via user@1000.service and start-cosmic —
-# the real login path minus greetd/PAM. Static config lives in the image.
+# inside-de.sh — run a freshly built COSMIC session. One script for both
+# transports (no parameters; it detects which container it's in):
+#
+#  tty container (VT session test): the container runs --pid=host with
+#  keep-id and has the host session's /dev/tty$VTNR passed through, so
+#  start-cosmic runs as the HOST user on the HOST logind session — the stock
+#  login path minus PAM. Uses the stock start-cosmic launcher, but the session
+#  bus is PRIVATE (start-cosmic's own dbus-run-session fallback) and systemctl
+#  is a no-op shim: the host bus is bind-mounted and shared uid, so routing
+#  the session at it lets the session's cosmic-settings-daemon steal
+#  com.system76.CosmicSettingsDaemon from the host's daemon (after the
+#  session stops the name is unowned and host apps' config watchers sit in
+#  growing 2^n backoff — theme changes stop propagating host-wide), its
+#  gsettings calls write the HOST dconf, and start-cosmic's
+#  `systemctl --user import-environment` diff loop imports the CONTAINER env
+#  (HOME=/home/dev, PATH, WAYLAND_DISPLAY=wayland-2) into the HOST user
+#  manager. No systemd supervision inside the container: cosmic-session
+#  supervises components itself via launch_pad, handing comp its env over a
+#  socket fd.
+#
+#  systemd dev container (nested): runs as dev under user@1000.service and
+#  start-cosmic — the real login path minus greetd/PAM. Static config lives
+#  in the image.
+#
+# The tty container runs with --pid=host --userns=keep-id, so every process
+# there is a host PID as the host UID. NEVER pkill in that branch — it would
+# kill the host's desktop too. cosmic-session tears down its own children on
+# SIGTERM.
 set -euo pipefail
 
-log()  { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+. scripts/lib.sh
 
+# Container-only: on the host the binary check would lie ("build + install"),
+# or — with COSMIC installed there — the tty branch would start a host session.
+in_container || die "run me inside the dev container (mise run enter, then mise run de)"
+
+# TTY detection: only the tty container passes the host session's VT node
+# through (--device /dev/tty$VTNR); the systemd container has no kernel VTs.
+if [ -n "${XDG_SESSION_ID:-}" ] && [ -c "/dev/tty${XDG_VTNR:-}" ]; then
+    for bin in start-cosmic cosmic-session cosmic-comp; do
+        command -v "$bin" >/dev/null || die "missing binary: $bin (build + install first: ./scripts/compile.sh && sudo ./scripts/install.sh)"
+    done
+
+    # Unset so cosmic-comp takes over the VT instead of nesting into a compositor.
+    unset WAYLAND_DISPLAY DISPLAY
+
+    # start-cosmic uses `${XDG_SESSION_TYPE:=wayland}` — won't override the
+    # "tty" value PAM sets on a VT login. Force wayland so cosmic-session picks
+    # the Wayland code path (the host VT is ours to drive via DRM/KMS).
+    export XDG_SESSION_TYPE=wayland
+
+    # Private session bus + no-op systemctl (see the header comment):
+    # start-cosmic's `set -e` needs systemctl to succeed, but nothing in the
+    # session needs the real one (no systemd inside; cosmic-session supervises
+    # via launch_pad). The shim also keeps cosmic-session's env writes off the
+    # HOST user manager. DBUS_SESSION_BUS_ADDRESS stays unset so start-cosmic's
+    # own fallback runs the session under dbus-run-session — a private bus.
+    shim_dir="/tmp/cosmic-epoch-shims"
+    mkdir -p "$shim_dir"
+    printf '#!/bin/sh\nexit 0\n' > "$shim_dir/systemctl"
+    chmod +x "$shim_dir/systemctl"
+    export PATH="$shim_dir:$PATH"
+    unset DBUS_SESSION_BUS_ADDRESS
+
+    for bin in cosmic-settings-daemon cosmic-panel cosmic-launcher cosmic-bg cosmic-notifications; do
+        command -v "$bin" >/dev/null || log "warning: missing $bin — session will be incomplete (./scripts/compile.sh && sudo ./scripts/install.sh)"
+    done
+
+    log "starting start-cosmic on ${XDG_SEAT:-seat0} VT ${XDG_VTNR:-?} (panel, launcher, bg, ...)"
+    log "clients: on another VT export the printed socket, e.g. WAYLAND_DISPLAY=wayland-1 cosmic-term"
+    # $$ is cosmic-session's PID after exec (--pid=host: same PID on host).
+    log "to stop: podman exec cosmic-tty kill -TERM $$   (or: kill -TERM $$ from any VT/host shell)"
+
+    # --in-login-shell skips start-cosmic's login-shell re-exec (we're already
+    # past the VT login; the re-exec would just fork bash -l -c start-cosmic again).
+    exec start-cosmic --in-login-shell "$@"
+fi
+
+# --- nested (systemd dev container) ------------------------------------------
 for bin in cosmic-comp cosmic-session start-cosmic; do
     command -v "$bin" >/dev/null || die "missing binary: $bin (build + install COSMIC first)"
 done
@@ -24,7 +98,10 @@ log out/in (or reboot) the HOST so its compositor recreates it, then rerun"
     sudo chmod 0711 /run/host-user 2>/dev/null || true
     sudo chmod 0666 "$HOST_SOCK" 2>/dev/null || true
 elif [ -z "${DISPLAY:-}" ]; then
-    die "no WAYLAND_DISPLAY or DISPLAY — start me via 'scripts/dev.sh de'"
+    # Getting here in the tty container means the session env was stripped —
+    # almost always sudo: env_reset drops XDG_SESSION_ID/XDG_VTNR, so the tty
+    # branch above can't match. The session must run as dev, never as root.
+    die "no WAYLAND_DISPLAY or DISPLAY — run 'mise run de' (without sudo) inside the dev container"
 fi
 
 # start-cosmic needs dev's user manager bus; linger is baked in but it takes a moment.
