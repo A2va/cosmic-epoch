@@ -1,45 +1,95 @@
 #!/usr/bin/env bash
-# Run COSMIC build/test environment in podman (preferred) or docker.
-# The container boots with systemd as PID 1, like a real system.
+# enter.sh — one entry point into the COSMIC build/test environment
+# (podman preferred, docker fallback). The container boots with systemd as
+# PID 1, like a real system. `mise run enter` runs this; components come
+# from mise.toml (COMPONENTS_DE / COMPONENTS_DM).
 #
-# Usage:
-#   scripts/dev.sh                 # systemd-booted dev shell
-#   scripts/dev.sh app BIN [args]  # run one built binary as a nested window
-#   scripts/dev.sh de              # full cosmic-session nested (build+install first)
-#   scripts/dev.sh dm              # display-manager boot (greeter + login)
-#   scripts/dev.sh tty-dm [VT]     # display-manager boot on a real host VT
-#                                  # (greetd + cosmic-greeter on /dev/tty$VT via
-#                                  #  DRM/KMS; VT defaults to login VT + 1)
-#   scripts/dev.sh tty [CMD...]    # VT session test (toolbox-like HW passthrough, no systemd)
+# TTY detection decides the mode:
+#   in a graphical terminal (WAYLAND_DISPLAY/DISPLAY set)
+#     ./scripts/enter.sh           # systemd container + bash session (reuse
+#                                  #  the running one; leave it up for
+#                                  #  'compile'/'install'/'app' afterwards)
+#     ./scripts/enter.sh de|dm     # bare container, then inside-de.sh/inside-dm.sh
+#   on a real VT (no compositor; login shell has XDG_VTNR / /dev/ttyN)
+#     ./scripts/enter.sh           # VT session test (toolbox-like HW
+#                                  #  passthrough, no systemd): dev tty
+#     ./scripts/enter.sh dm [VT]   # greeter on a free host VT (rootful
+#                                  #  podman; VT defaults to login VT + 1)
+#   inside the container, any of the above still resolves sensibly.
+#
+# tty-dm note: greetd does raw VT ioctls (KDSETMODE, VT_ACTIVATE), needing
+# CAP_SYS_TTY_CONFIG in the HOST userns — rootless podman can't provide it,
+# so this one mode escalates (sudo podman, not sudo -E re-exec: that
+# detaches the controlling tty and podman exec -it can't allocate a pty).
+# The script keeps running as the user with its tty; only podman runs as root.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/lib.sh
 die() { echo "error: $*" >&2; exit 1; }
 
-export DE_COMPONENTS="cosmic-comp cosmic-session cosmic-panel cosmic-applets cosmic-applibrary cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
-export DM_COMPONENTS="$DE_COMPONENTS cosmic-greeter"
+MODE=""
+DM=0
+for a in "$@"; do
+    case "$a" in
+    de|dm)      MODE="$a"; [ "$a" = dm ] && DM=1 ;;
+    app)        MODE=app ;;
+    enter)      ;;
+    tty)        MODE=tty ;;
+    tty-dm)     MODE=tty-dm ;;
+    --)         break ;;
+    *)          break ;;
+    esac
+    shift
+done
 
-MODE="${1:-enter}"
-shift || true
-
-# Already inside the container? Run directly.
+# Inside the container (e.g. 'mise run enter' inside the dev shell): serve
+# the graphical modes without a runtime; VT modes need the host.
 if [ -f /.dockerenv ] || [ -n "${container:-}" ]; then
     case "$MODE" in
-    enter)   exec bash ;;
-    app)     [ $# -ge 1 ] || { echo "usage: $0 app BINARY [args...]" >&2; exit 1; }
+    ""|enter) exec bash ;;
+    app)     [ $# -ge 1 ] || { echo "usage: mise run app BINARY [args...]" >&2; exit 1; }
              exec "$@" ;;
-    de)      echo "  just c $DE_COMPONENTS"
-             echo "  sudo just ci $DE_COMPONENTS"
+    de)      echo "  mise run compile ${COMPONENTS_DE:-<components>}"
+             echo "  sudo mise run install ${COMPONENTS_DE:-<components>}"
              echo "  ./scripts/inside-de.sh"
              exec ./scripts/inside-de.sh ;;
-    dm)      echo "  just c $DM_COMPONENTS"
-             echo "  sudo just ci $DM_COMPONENTS"
+    dm)      echo "  mise run compile ${COMPONENTS_DM:-<components>}"
+             echo "  sudo mise run install ${COMPONENTS_DM:-<components>}"
              echo "  ./scripts/inside-dm.sh"
              exec ./scripts/inside-dm.sh ;;
-    tty-dm)  echo "tty-dm needs a real VT — run from the host, not inside the container" >&2; exit 1 ;;
-    tty)     echo "tty mode needs a real VT — run from the host, not inside the container" >&2; exit 1 ;;
-    *)       echo "unknown mode: $MODE (enter|app|de|dm|tty-dm|tty)" >&2; exit 1 ;;
+    *)       echo "modes $MODE need a real VT — run from the host, not inside the container" >&2; exit 1 ;;
     esac
 fi
+
+# TTY detection: graphical terminal (compositor env) → nested modes; real VT
+# (XDG_VTNR or stdin /dev/ttyN) → the VT modes. PAM sets neither on a bare VT
+# login, so this is reliable — X passthrough shells keep DISPLAY, wayland
+# shells keep WAYLAND_DISPLAY.
+if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
+    MODE="${MODE:-enter}"
+elif [ -n "${XDG_VTNR:-}" ] || tty 2>/dev/null | grep -q '^/dev/tty[0-9]\+$'; then
+    # Real VT: session test by default, greeter with the dm arg. No compositor
+    # env here, so dev-tty/dev-tty-dm are the only things that make sense.
+    if [ "$DM" = 1 ]; then
+        MODE="tty-dm"
+    else
+        MODE="${MODE:-tty}"
+    fi
+elif [ -z "$MODE" ]; then
+    die "no WAYLAND_DISPLAY/DISPLAY and no VT detected — run from a graphical shell or log in on a VT"
+fi
+
+# Component lists: mise.toml env COMPONENTS_DE / COMPONENTS_DM is the source
+# of truth; legacy DE_COMPONENTS/DM_COMPONENTS names still work for callers
+# that set them. The container's inside-* scripts read these env vars too —
+# forwarded on container creation below.
+if [ -z "${DE_COMPONENTS:-}" ]; then
+    DE_COMPONENTS="${COMPONENTS_DE:?COMPONENTS_DE not set — run via mise (mise run enter)}"
+fi
+if [ -z "${DM_COMPONENTS:-}" ]; then
+    DM_COMPONENTS="${COMPONENTS_DM:?COMPONENTS_DM not set — run via mise (mise run enter)}"
+fi
+export DE_COMPONENTS DM_COMPONENTS
 
 # Rootful but unprivileged (never --privileged). No keep-id: it remaps root
 # away from you and systemd can't create /init.scope.
@@ -50,9 +100,29 @@ else
 fi
 RT_BIN="${RT_CMD[0]}"  # for checks that need the runtime name, not the sudo prefix
 RUNARGS=(--security-opt label=disable)
+EXEC=()
+
+CTR=cosmic-dev
+REUSED=0
+# Graphical modes reuse a running container instead of recreating it — a
+# nested session must survive across 'enter' → 'app' → 'compile' invocations.
+# Rootful leftovers (tty-dm) live in the sudo store: exec those via sudo -u dev.
+case "$MODE" in
+enter|app|de|dm)
+    if container_running "$CTR"; then
+        REUSED=1
+        if ! "${RT_CMD[@]}" ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
+            RT_CMD=(sudo "${RT_CMD[@]}")
+            EXEC=(-u dev)
+        fi
+    fi
+    ;;
+esac
+state="none"
+[ "$REUSED" = 1 ] && state="running (reused)"
 
 IMG=localhost/cosmic-build-env
-"${RT_CMD[@]}" build -t "$IMG" .devcontainer/
+[ "$REUSED" = 1 ] || "${RT_CMD[@]}" build -t "$IMG" .devcontainer/
 
 RT_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # Mount the host runtime dir at /run/host-user ONLY. Never at /run/user/1000:
@@ -62,7 +132,8 @@ MOUNTS=(-v "$PWD:/cosmic-epoch" -v "$RT_DIR:/run/host-user")
 # Relative WAYLAND_DISPLAY resolves here; the dm session overrides it with
 # logind's /run/user/1000. Not writable by dev under rootless mapping, so
 # just gets its own writable runtime dir.
-ENVS=(-e XDG_RUNTIME_DIR=/run/host-user -e JUST_RUNTIME_DIR=/home/dev/.cache/just)
+ENVS=(-e XDG_RUNTIME_DIR=/run/host-user -e JUST_RUNTIME_DIR=/home/dev/.cache/just
+      -e "COMPONENTS_DE=$DE_COMPONENTS" -e "COMPONENTS_DM=$DM_COMPONENTS")
 
 if [ "$MODE" != tty ] && [ "$MODE" != tty-dm ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
     ENVS+=(-e "WAYLAND_DISPLAY=${WAYLAND_DISPLAY}")
@@ -75,7 +146,7 @@ fi
 
 # Nested cosmic-comp defaults to US English. Detect the host layout for
 # `just config`; explicit XKB_DEFAULT_* wins. Override e.g.:
-#   XKB_DEFAULT_LAYOUT=de XKB_DEFAULT_VARIANT=nodeadkeys scripts/dev.sh de
+#   XKB_DEFAULT_LAYOUT=de XKB_DEFAULT_VARIANT=nodeadkeys scripts/enter.sh de
 _host_status="$(localectl status --no-pager 2>/dev/null || true)"
 _pick_xkb() { printf '%s\n' "$_host_status" | sed -n "s/.*$1:[[:space:]]*//p" | tr -d ' ' | sed -e 's/^n\/a$//'; }
 : "${XKB_DEFAULT_LAYOUT:=$(_pick_xkb 'X11 Layout')}"
@@ -111,14 +182,13 @@ unset PACK_XKB
 # Named volume so the registry cache survives recreation (:U chowns it for
 # rootless podman). Artifacts stay in each component's target/ under the repo.
 CARGO_VOL="cosmic-cargo"
-"${RT_CMD[@]}" volume create "$CARGO_VOL" >/dev/null 2>&1 || true
-U=""; [ "$RT_BIN" = podman ] && U=":U"
+"${RT_CMD[@]}" volume create "$CARGO_VOL" >/dev/null 2>&1 || trueU=""; [ "$RT_BIN" = podman ] && U=":U"
 MOUNTS+=(-v "$CARGO_VOL:/home/dev/.cargo$U")
 ENVS+=(-e CARGO_HOME=/home/dev/.cargo -e RUSTUP_HOME=/usr/local/share/rustup)
 
 # VT test: toolbox-like passthrough so cosmic-comp gets the host seat, DRM/input
 # devices and udev tags directly. Plain container, no systemd. Run from a free
-# VT after host login, e.g. `scripts/dev.sh tty cosmic-comp`.
+# VT after host login, e.g. `scripts/enter.sh tty cosmic-comp`.
 if [ "$MODE" = tty ]; then
     [ "$RT_BIN" = podman ] || die "tty mode needs podman (pid=host + keep-id)"
     # Which VT? Prefer XDG_VTNR, fall back to parsing `tty`. The compositor
@@ -150,7 +220,7 @@ if [ "$MODE" = tty ]; then
     done
     if [ $# -eq 0 ]; then
         echo "tty container (VT tty$VTNR). Then:"
-        echo "  sudo just ci cosmic-config $DE_COMPONENTS"
+        echo "  sudo ./scripts/install.sh cosmic-config $DE_COMPONENTS"
         echo "  ./scripts/inside-tty.sh            # full session: comp, panel, launcher, bg"
         set -- bash
     fi
@@ -208,8 +278,8 @@ if [ "$MODE" = tty-dm ]; then
         done
     fi
     [ "$GREETER_VT" != "$LOGIN_VT" ] \
-        || die "greeter VT ($GREETER_VT) == login VT — pass a free VT: scripts/dev.sh tty-dm <vt>"
-    [ -c "/dev/tty$GREETER_VT" ] || die "/dev/tty$GREETER_VT does not exist — pass a valid VT: scripts/dev.sh tty-dm <vt>"
+        || die "greeter VT ($GREETER_VT) == login VT — pass a free VT: scripts/enter.sh dm <vt>"
+    [ -c "/dev/tty$GREETER_VT" ] || die "/dev/tty$GREETER_VT does not exist — pass a valid VT: scripts/enter.sh dm <vt>"
     # Stop getty on the greeter VT (mimics the DM unit's Conflicts=getty@ttyN).
     sudo systemctl stop "getty@tty$GREETER_VT.service" 2>/dev/null || true
     DM_DEVS=()
@@ -320,41 +390,47 @@ SYSTEMD_ARGS=(--tmpfs /run --tmpfs /run/lock --tmpfs /tmp:rw,nosuid,exec
 [ "$RT_BIN" = podman ] && SYSTEMD_ARGS+=(--systemd=always)
 
 CTR=cosmic-dev
-"${RT_CMD[@]}" rm -f "$CTR" >/dev/null 2>&1 || true
-"${RT_CMD[@]}" run -d --name "$CTR" "${RUNARGS[@]}" "${SYSTEMD_ARGS[@]}" \
-    "${MOUNTS[@]}" "${ENVS[@]}" -w /cosmic-epoch --entrypoint /sbin/init "$IMG" \
-    || die "systemd container failed to start"
-cleanup() {
-    # Loud if it fails: a silently surviving container keeps the greeter on
-    # the VT and the DRM/input devices grabbed.
-    if ! "${RT_CMD[@]}" rm -f "$CTR" >/dev/null 2>&1; then
-        echo "warning: could not remove container $CTR — run: ${RT_CMD[*]} rm -f $CTR" >&2
-    fi
-    # tty-dm: hand the greeter VT back to the getty we stopped at start.
-    if [ "$MODE" = tty-dm ] && [ -n "${GREETER_VT:-}" ]; then
-        sudo systemctl start "getty@tty$GREETER_VT.service" 2>/dev/null || true
-    fi
-}
-trap cleanup EXIT
+if [ "$REUSED" = 0 ]; then
+    "${RT_CMD[@]}" rm -f "$CTR" >/dev/null 2>&1 || true
+    "${RT_CMD[@]}" run -d --name "$CTR" "${RUNARGS[@]}" "${SYSTEMD_ARGS[@]}" \
+        "${MOUNTS[@]}" "${ENVS[@]}" -w /cosmic-epoch --entrypoint /sbin/init "$IMG" \
+        || die "systemd container failed to start"
+    cleanup() {
+        # Loud if it fails: a silently surviving container keeps the greeter on
+        # the VT and the DRM/input devices grabbed.
+        if ! "${RT_CMD[@]}" rm -f "$CTR" >/dev/null 2>&1; then
+            echo "warning: could not remove container $CTR — run: ${RT_CMD[*]} rm -f $CTR" >&2
+        fi
+        # tty-dm: hand the greeter VT back to the getty we stopped at start.
+        if [ "$MODE" = tty-dm ] && [ -n "${GREETER_VT:-}" ]; then
+            sudo systemctl start "getty@tty$GREETER_VT.service" 2>/dev/null || true
+        fi
+    }
+    trap cleanup EXIT
+else
+    echo "reusing running container $CTR (state: $state)"
+fi
 
 # wait for systemd to finish booting
-state=""
-for _ in $(seq 1 120); do
-    state="$("${RT_CMD[@]}" exec "$CTR" systemctl is-system-running 2>/dev/null || true)"
-    case "$state" in running|degraded) break ;; esac
-    sleep 0.5
-done
-case "$state" in
-    running|degraded) ;;
-    *) "${RT_CMD[@]}" logs "$CTR" >&2 || true; die "systemd did not boot (state: ${state:-none})" ;;
-esac
-"${RT_CMD[@]}" exec "$CTR" chown -R dev:dev /home/dev/.cargo >/dev/null 2>&1 || true
+if [ "$REUSED" = 0 ]; then
+    state=""
+    for _ in $(seq 1 120); do
+        state="$("${RT_CMD[@]}" exec "$CTR" systemctl is-system-running 2>/dev/null || true)"
+        case "$state" in running|degraded) break ;; esac
+        sleep 0.5
+    done
+    case "$state" in
+        running|degraded) ;;
+        *) "${RT_CMD[@]}" logs "$CTR" >&2 || true; die "systemd did not boot (state: ${state:-none})" ;;
+    esac
+    "${RT_CMD[@]}" exec "$CTR" chown -R dev:dev /home/dev/.cargo >/dev/null 2>&1 || true
 
-# NVIDIA passthrough: ldconfig registers the host-mounted vendor GL/EGL
-# libs so glvnd/dlopen resolve them without LD_LIBRARY_PATH tricks.
-if [ -n "${NV:-}" ]; then
-    "${RT_CMD[@]}" exec "$CTR" ldconfig 2>/dev/null \
-        || echo "warning: ldconfig failed in container — EGL may miss the nvidia vendor lib" >&2
+    # NVIDIA passthrough: ldconfig registers the host-mounted vendor GL/EGL
+    # libs so glvnd/dlopen resolve them without LD_LIBRARY_PATH tricks.
+    if [ -n "${NV:-}" ]; then
+        "${RT_CMD[@]}" exec "$CTR" ldconfig 2>/dev/null \
+            || echo "warning: ldconfig failed in container — EGL may miss the nvidia vendor lib" >&2
+    fi
 fi
 
 # Rootless podman maps container root to you, so build as root; docker and
@@ -373,30 +449,27 @@ app)
     ;;
 de)
     echo "systemd container up (state: $state). Then:"
-    echo "  just c $DE_COMPONENTS"
-    echo "  sudo just ci $DE_COMPONENTS"
-    echo "  sudo -u dev just config"
+    echo "  mise run compile $DE_COMPONENTS"
+    echo "  mise run install $DE_COMPONENTS   # bare 'mise run install' also deploys the config pack"
     echo "  ./scripts/inside-de.sh"
     "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
     ;;
 dm)
     echo "systemd container up (state: $state). Then:"
-    echo "  just c $DM_COMPONENTS"
-    echo "  sudo just ci $DM_COMPONENTS"
-    echo "  sudo -u dev just config"
+    echo "  mise run compile $DM_COMPONENTS"
+    echo "  mise run install $DM_COMPONENTS"
     echo "  ./scripts/inside-dm.sh"
     "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
     ;;
 tty-dm)
     echo "systemd container up (state: $state). Then:"
-    echo "  just c $DM_COMPONENTS"
-    echo "  sudo just ci $DM_COMPONENTS"
-    echo "  sudo -u dev just config"
+    echo "  mise run compile $DM_COMPONENTS"
+    echo "  mise run install $DM_COMPONENTS"
     echo "  ./scripts/inside-dm.sh"
     "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
     ;;
 *)
-    echo "unknown mode: $MODE (enter|app|de|dm|tty-dm|tty)" >&2
+    echo "unknown mode: $MODE (enter|app|de|dm|tty|tty-dm)" >&2
     exit 1
     ;;
 esac

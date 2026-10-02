@@ -1,0 +1,43 @@
+# Dev toolchain: rust toolchain (clippy is part of rustup's 'rust' component) and just.
+# The devcontainer Dockerfile installs these same tools via mise at build time.
+[tools]
+rust = { version = "latest", components = "rustfmt,clippy" }
+just = "latest"
+
+# COSMIC components compiled/installed by the dev tasks (build order).
+# DE sessions: greedy tasks that want compile+install as one unit are separate.
+[env]
+COMPONENTS_DE = "cosmic-comp cosmic-session cosmic-panel cosmic-applets cosmic-applibrary cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
+COMPONENTS_DM = "{{env.COMPONENTS_DE}} cosmic-greeter"
+
+[tasks.enter]
+description = "Enter the dev container: graphical shell = bash session (reuses a running container), VT = session test on the VT. Arg 'dm' = display manager (greeter)"
+raw = true
+run = """
+./scripts/enter.sh "$@"
+"""
+
+[tasks.app]
+description = "Run a built COSMIC binary/app inside the container"
+raw = true
+run = """
+./scripts/enter.sh app "$@"
+"""
+
+[tasks.compile]
+description = "Build COSMIC components (debug). DEBUG=0 release. Nothing = all components"
+raw = true
+run = """
+./scripts/compile.sh "$@"
+"""
+
+[tasks.install]
+description = "Install COSMIC components into the container (must be run inside the container)"
+raw = true
+run = """
+./scripts/install.sh "$@"
+"""
+
+[tasks.stop]
+description = "Stop a running COSMIC session (user + system)"
+run = "./scripts/stop-session.sh"
