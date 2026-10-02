@@ -1,0 +1,76 @@
+# Dev toolchain: rust toolchain (clippy is part of rustup's 'rust' component) and just.
+# The devcontainer Dockerfile installs these same tools via mise at build time.
+[tools]
+rust = { version = "latest", components = "rustfmt,clippy" }
+just = "latest"
+
+# COSMIC components compiled/installed by the dev tasks (build order).
+# DE sessions: greedy tasks that want compile+install as one unit are separate.
+[env]
+COMPONENTS_DE = "cosmic-comp cosmic-session cosmic-osk cosmic-panel cosmic-applets cosmic-applibrary cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
+COMPONENTS_DM = "{{env.COMPONENTS_DE}} cosmic-greeter"
+# DEBUG = 1
+
+[tasks.enter]
+description = "Enter a bash terminal inside the container. Works on both standard terminal and tty. Non op when already inside a devcontainer"
+raw = true
+run = """
+./scripts/enter.sh "$@"
+"""
+
+[tasks.de]
+description = "Run the COSMIC session on the host compositor"
+raw = true
+run = "./scripts/inside-de.sh \"$@\""
+
+[tasks.dm]
+description = "Run the COSMIC greeter"
+raw = true
+run = "./scripts/inside-dm.sh \"$@\""
+
+[tasks.app]
+description = "Run a COSMIC application on the host compositor"
+raw = true
+run = """
+./scripts/app.sh "$@"
+"""
+
+[tasks.compile]
+description = "Build COSMIC components. DEBUG=0 release. Nothing = all components; arg 'de' or 'dm' selects the DE/DM set"
+raw = true
+run = """
+./scripts/compile.sh "$@"
+"""
+
+[tasks.install]
+description = "Install COSMIC components into the dev container (container only). Nothing = all DE + config pack"
+raw = true
+run = """
+./scripts/install.sh "$@"
+"""
+
+[tasks.stop]
+description = "Stop a running COSMIC session (container keeps running; --rm also removes the container)"
+raw = true
+run = './scripts/stop-session.sh "$@"'
+
+[tasks.reset]
+description = "Reset one or more submodules to the superproject pinned commit, discarding local edits. No args = all submodules. e.g. mise run reset cosmic-settings-daemon cosmic-files"
+raw = true
+run = """
+#!/usr/bin/env sh
+set -e
+if [ $# -gt 0 ]; then
+    set -- "$@"
+else
+    set -- $(git submodule status | awk '{print $2}')
+fi
+for s in "$@"; do
+    s="${s%/}" # autocomplete adds trailing slash
+    [ -e "$s" ] || { echo "skip (not a submodule): $s" >&2; continue; }
+    # Fetch all remotes so the pinned commit is reachable; non-fatal if offline.
+    git -C "$s" fetch --all -q 2>/dev/null || true
+    echo "reset $s -> superproject pinned commit"
+    git submodule update --init --force --checkout "$s"
+done
+"""
