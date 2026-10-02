@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # inside-dm.sh — full display-manager boot inside the devcontainer,
-# driven by systemd. Start from the host with `scripts/dev.sh dm`:
+# driven by systemd. Start from the host with `scripts/enter.sh dm`:
 #
 #   systemd
 #     ├─ cosmic-greeter-daemon.service  (system bus: user list)
@@ -25,7 +25,7 @@ for bin in cosmic-comp cosmic-greeter cosmic-greeter-daemon cosmic-session start
     command -v "$bin" >/dev/null || die "missing binary: $bin (build + install COSMIC first)"
 done
 [ -f /usr/share/dbus-1/system.d/com.system76.CosmicGreeter.conf ] \
-    || die "dbus policy missing — run 'sudo just ci cosmic-greeter'"
+    || die "dbus policy missing — run 'sudo ./scripts/install.sh cosmic-greeter'"
 
 state=""
 for _ in $(seq 1 100); do
@@ -35,7 +35,7 @@ for _ in $(seq 1 100); do
 done
 case "$state" in
     running|degraded) ;;
-    *) die "systemd is not managing this container (state: ${state:-none}) — start via 'scripts/dev.sh dm'" ;;
+    *) die "systemd is not managing this container (state: ${state:-none}) — start via 'scripts/enter.sh dm'" ;;
 esac
 
 # greetd scrubs its env, so the host display must go via pam_env
@@ -53,7 +53,7 @@ esac
 if [ -n "${XDG_VTNR:-}" ]; then
     TTY_DM=1
     command -v seatd >/dev/null \
-        || die "seatd not installed — rebuild the image: 'scripts/dev.sh tty-dm' (picks up Dockerfile change)"
+        || die "seatd not installed — rebuild the image: 'scripts/enter.sh dm [VT]' (picks up Dockerfile change)"
     sudo sed -i "s/^vt = .*/vt = \"${XDG_VTNR}\"/" /etc/greetd/cosmic-greeter.toml
     grep -q "^vt = \"${XDG_VTNR}\"" /etc/greetd/cosmic-greeter.toml \
         || die "failed to set vt = $XDG_VTNR in /etc/greetd/cosmic-greeter.toml"
@@ -112,7 +112,7 @@ log out/in (or reboot) the HOST so its compositor recreates it, then rerun"
 elif [ -n "${DISPLAY:-}" ]; then
     HOST_ENV="DISPLAY=$DISPLAY"
 else
-    die "no WAYLAND_DISPLAY or DISPLAY — start me via 'scripts/dev.sh dm'"
+    die "no WAYLAND_DISPLAY or DISPLAY — start me via 'scripts/enter.sh dm'"
 fi
 
 # Replace (not append) so reruns don't stack entries. Only what's
@@ -144,7 +144,7 @@ else
     sudo rm -f /home/dev/.config/environment.d/10-debug.conf
 fi
 
-# dbus scans policy only at startup — HUP it after `just ci`; apply tmpfiles as a real boot would.
+# dbus scans policy only at startup — HUP it after install; apply tmpfiles as a real boot would.
 sudo systemctl kill -s HUP dbus.service 2>/dev/null || true
 sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/cosmic-greeter.conf 2>/dev/null || true
 

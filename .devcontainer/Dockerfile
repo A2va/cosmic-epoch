@@ -1,8 +1,8 @@
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV DE_COMPONENTS="cosmic-comp cosmic-session cosmic-panel cosmic-applets cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
-ENV DM_COMPONENTS="$DE_COMPONENTS cosmic-greeter"
+# Components (COMPONENTS_DE/COMPONENTS_DM) live in the repo's mise.toml —
+# enter.sh forwards them into the container at creation; no copies here.
 
 # trusted=yes skips Pop archive key verification; fine for a disposable dev image
 RUN echo "deb [trusted=yes] https://apt.pop-os.org/release noble main" \
@@ -22,7 +22,7 @@ RUN apt-get install -y --no-install-recommends \
     libfontconfig-dev libfreetype-dev \
     libflatpak-dev
 
-# Runtime deps; systemd runs as PID 1 for `dev.sh dm`.
+# Runtime deps; systemd runs as PID 1 for `scripts/enter.sh dm`.
 RUN apt-get install -y --no-install-recommends \
     dbus dbus-user-session \
     greetd \
@@ -36,7 +36,7 @@ RUN apt-get install -y --no-install-recommends \
 # Rename ubuntu (uid 1000) to dev; password 'cosmic' for the greeter login.
 # -c SHA512: yescrypt's (chpasswd default) ~16MB buffer can't mmap inside greetd's mlockall()ed
 # worker (8MB RLIMIT_MEMLOCK), so pam_unix would reject EVERY password.
-# env_keep: sudo's env_reset drops DEBUG, so 'DEBUG=0 sudo just ci X' silently
+# env_keep: sudo's env_reset drops DEBUG, so 'DEBUG=0 sudo ./scripts/install.sh X' silently
 # installs debug artifacts (the justfile defaults to DEBUG=1).
 RUN usermod -l dev -d /home/dev -m ubuntu \
     && groupmod -n dev ubuntu \
@@ -104,9 +104,11 @@ RUN install -d /etc/greetd \
     && printf 'd\t/var/lib/cosmic-greeter\t0750\tcosmic-greeter\tcosmic-greeter\nd\t/run/cosmic-greeter\t0755\tcosmic-greeter\tcosmic-greeter\t-\n' \
     > /usr/lib/tmpfiles.d/cosmic-greeter.conf
 
-# Rust & just via mise, system-wide so dev and root share them. RUSTUP_HOME
-# must live outside /root, else 'stable' symlinks there; link the real
-# binaries since the rustup proxies require RUSTUP_HOME in env.
+# Rust & just via mise, system-wide so dev and root share them. rustup's
+# default profile includes clippy and rustfmt (matches the repo's mise.toml
+# [tools] block — keep the two in sync). RUSTUP_HOME must live outside /root,
+# else 'stable' symlinks there; link the real binaries since the rustup
+# proxies require RUSTUP_HOME in env.
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
     && export RUSTUP_HOME=/usr/local/share/rustup CARGO_HOME=/usr/local/share/cargo \
     && mise install --system rust@stable just@latest \

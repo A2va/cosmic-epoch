@@ -24,7 +24,7 @@ log out/in (or reboot) the HOST so its compositor recreates it, then rerun"
     sudo chmod 0711 /run/host-user 2>/dev/null || true
     sudo chmod 0666 "$HOST_SOCK" 2>/dev/null || true
 elif [ -z "${DISPLAY:-}" ]; then
-    die "no WAYLAND_DISPLAY or DISPLAY — start me via 'scripts/dev.sh de'"
+    die "no WAYLAND_DISPLAY or DISPLAY — start me via './scripts/enter.sh de'"
 fi
 
 # start-cosmic needs dev's user manager bus; linger is baked in but it takes a moment.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # inside-tty.sh — run a freshly built COSMIC session directly on the host VT
-# (DRM/KMS), from inside `scripts/dev.sh tty`. Uses the stock start-cosmic
+# (DRM/KMS), from inside `scripts/enter.sh tty`. Uses the stock start-cosmic
 # launcher (same env, same `systemctl --user import-environment`, same
 # dbus-run-session fallback as a real host login) by routing the user bus at
 # the host user manager — the tty container bind-mounts $XDG_RUNTIME_DIR and
@@ -18,10 +18,10 @@ set -euo pipefail
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-command -v start-cosmic   >/dev/null || die "missing binary: start-cosmic (build + install first: just c cosmic-session && sudo just ci cosmic-session)"
-command -v cosmic-session >/dev/null || die "missing binary: cosmic-session (build + install first: just c cosmic-session && sudo just ci cosmic-session)"
-command -v cosmic-comp    >/dev/null || die "missing binary: cosmic-comp (build + install first: just c cosmic-comp && sudo just ci cosmic-comp)"
-[ -n "${XDG_SESSION_ID:-}" ] || die "no logind session (XDG_SESSION_ID empty) — launch via 'scripts/dev.sh tty' from a VT login"
+command -v start-cosmic   >/dev/null || die "missing binary: start-cosmic (build + install first: ./scripts/compile.sh cosmic-session && sudo ./scripts/install.sh cosmic-session)"
+command -v cosmic-session >/dev/null || die "missing binary: cosmic-session (build + install first: ./scripts/compile.sh cosmic-session && sudo ./scripts/install.sh cosmic-session)"
+command -v cosmic-comp    >/dev/null || die "missing binary: cosmic-comp (build + install first: ./scripts/compile.sh cosmic-comp && sudo ./scripts/install.sh cosmic-comp)"
+[ -n "${XDG_SESSION_ID:-}" ] || die "no logind session (XDG_SESSION_ID empty) — launch via 'scripts/enter.sh tty' from a VT login"
 
 # Unset so cosmic-comp takes over the VT instead of nesting into a compositor.
 unset WAYLAND_DISPLAY DISPLAY
@@ -38,12 +38,12 @@ export XDG_SESSION_TYPE=wayland
 # than fall back to a private bus that desyncs the host activation env.
 if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
     [ -S "$XDG_RUNTIME_DIR/bus" ] \
-        || die "host user bus not at $XDG_RUNTIME_DIR/bus — launch via 'scripts/dev.sh tty' from a VT login (host user manager must be up)"
+        || die "host user bus not at $XDG_RUNTIME_DIR/bus — launch via 'scripts/enter.sh tty' from a VT login (host user manager must be up)"
     export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 fi
 
 for bin in cosmic-settings-daemon cosmic-panel cosmic-launcher cosmic-bg cosmic-notifications; do
-    command -v "$bin" >/dev/null || log "warning: missing $bin — session will be incomplete (just c $bin && sudo just ci $bin)"
+    command -v "$bin" >/dev/null || log "warning: missing $bin — session will be incomplete (./scripts/compile.sh $bin && sudo ./scripts/install.sh $bin)"
 done
 
 log "starting start-cosmic on ${XDG_SEAT:-seat0} VT ${XDG_VTNR:-?} (panel, launcher, bg, ...)"
