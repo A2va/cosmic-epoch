@@ -36,7 +36,11 @@ for c in $comps; do
         fi
         ;;
     just-data)
-        (cd "$c" && HOME=/home/dev just "prefix=${COSMIC_PREFIX:-/usr}" install)
+        # Only some data justfiles declare prefix (cosmic-config installs to
+        # dev's home and doesn't take one).
+        pf="prefix=${COSMIC_PREFIX:-/usr}"
+        grep -q 'prefix[[:space:]]*:=' "$c/"[jJ]ustfile 2>/dev/null || pf=
+        (cd "$c" && HOME=/home/dev just ${pf:+"$pf"} install)
         ;;
     make)
         (cd "$c" && HOME=/home/dev make "DEBUG=$d" install "DESTDIR=${COSMIC_ROOTDIR:-}" "prefix=${COSMIC_PREFIX:-/usr}")
