@@ -12,11 +12,14 @@ runtime() {
 }
 
 # Is container "$1" running? Checks the user store, then the rootful store
-# (sudo podman — tty-dm leftovers live there).
+# (sudo podman — tty-dm leftovers live there). Pass "probe" to use `sudo -n`
+# so detection never blocks on a password prompt (nested enter/de runs).
 container_running() {
     local rt; rt="$(runtime)"
     if "$rt" ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; then return 0; fi
-    if [ "$rt" = podman ] && sudo podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; then return 0; fi
+    local sn=""
+    [ "${2:-}" = probe ] && sn="-n"
+    if [ "$rt" = podman ] && sudo $sn podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; then return 0; fi
     return 1
 }
 
@@ -86,7 +89,9 @@ ensure_dev_container() {
 
     # Rootless podman maps container root to you, so exec as root; docker and
     # rootful podman (tty-dm leftovers via sudo) both need -u dev.
-    if container_running "$CTR"; then
+    # Probing only — tty-dm leftovers are irrelevant here, and an unconditional
+    # sudo podman ps would prompt for a password outside a tty (nested mode).
+    if container_running "$CTR" probe; then
         REUSED=1
         if ! "${RT_CMD[@]}" ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
             RT_CMD=(sudo "${RT_CMD[@]}")
