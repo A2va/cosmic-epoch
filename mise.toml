@@ -49,5 +49,6 @@ run = """
 """
 
 [tasks.stop]
-description = "Stop a running COSMIC session (user + system)"
-run = "./scripts/stop-session.sh"
+description = "Stop a running COSMIC session (container keeps running; --rm also removes the container)"
+raw = true
+run = './scripts/stop-session.sh "$@"'

@@ -16,15 +16,40 @@ for a in "$@"; do
     esac
 done
 
-# Session teardown, identical from inside and outside (outside runs it via
-# runtime exec). Polite target stop first, then stragglers; display-manager
-# is a symlink to cosmic-greeter.service (baked in the image), so stopping it
-# also tears down greetd on a real-VT (tty-dm) run.
+# SIGKILL every cosmic-* process inside a cgroup-v2 subtree — and ONLY there.
+# The tty container runs --pid=host, so a plain `pkill -u <uid>` would also
+# match the HOST's own cosmic processes (e.g. a real COSMIC desktop running
+# as the same uid); the container's cgroup subtree is the exact "inside this
+# container" boundary. cgroup.procs lists only direct members, so recurse
+# into sub-cgroups (the systemd dev container keeps the session under
+# user@1000.service sub-scopes). Self-contained: runs via eval or exec.
+kill_tree_sn='
+cg="$(sed -n "s/^0:://p" /proc/$$/cgroup)"
+[ -n "$cg" ] || { echo "no cgroup v2 path for pid $$ — refusing an unscoped kill" >&2; exit 1; }
+kill_tree() {
+    local d="/sys/fs/cgroup$1" p sub
+    [ -r "$d/cgroup.procs" ] || { echo "cannot read $d/cgroup.procs" >&2; exit 1; }
+    while read -r p; do
+        case "$(cat "/proc/$p/comm" 2>/dev/null)" in
+            cosmic-*) kill -KILL "$p" 2>/dev/null || true ;;
+        esac
+    done < "$d/cgroup.procs"
+    for sub in "$d"/*/; do
+        [ -d "$sub" ] && kill_tree "${sub#/sys/fs/cgroup}"
+    done
+}
+kill_tree "$cg"
+'
+
+# systemd dev container teardown: polite target stop first, then stragglers
+# via the cgroup sweep; display-manager.service is a symlink to
+# cosmic-greeter.service (baked in the image), so stopping it also tears down
+# greetd on a real-VT (tty-dm) run. Identical inside and via runtime exec.
 stop_session='
     sudo -u dev env XDG_RUNTIME_DIR=/run/user/1000 \
             DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
             systemctl --user stop cosmic-session.target 2>/dev/null || true
-    pkill -KILL -u dev "^cosmic-" 2>/dev/null || true
+'"$kill_tree_sn"'
     if [ -e /etc/systemd/system/display-manager.service ]; then
         sudo systemctl stop display-manager.service 2>/dev/null || true
     fi
@@ -37,10 +62,11 @@ if in_container; then
 else
     rt="$(runtime)"
     rt_cmd=("$rt")
-    # cosmic-dev may be in the rootful store (tty-dm leftovers): sudo podman.
+    # Rootful cosmic-dev (tty-dm leftovers) lives in sudo podman's store.
+    # sudo -n: probe only — never block on a password prompt.
     if ! "$rt" ps --format '{{.Names}}' 2>/dev/null | grep -qx cosmic-dev \
         && [ "$rt" = podman ] \
-        && sudo podman ps --format '{{.Names}}' 2>/dev/null | grep -qx cosmic-dev; then
+        && sudo -n podman ps --format '{{.Names}}' 2>/dev/null | grep -qx cosmic-dev; then
         rt_cmd=(sudo podman)
     fi
 
@@ -52,13 +78,17 @@ else
     fi
     if "$rt" ps --format '{{.Names}}' 2>/dev/null | grep -qx cosmic-tty; then
         found=true
-        # No systemd here — kill the session's cosmic-* processes directly.
-        # The exec runs as the container's own (keep-id) user, so it can only
-        # signal that container's processes, never host/other-user ones.
-        "$rt" exec cosmic-tty bash -c 'pkill -KILL -u "$(id -u)" "^cosmic-"' || true
+        # No systemd here — sweep via exec: the exec process lands in the
+        # container's cgroup, which scopes the kill (see kill_tree_sn).
+        rc=0
+        "$rt" exec cosmic-tty bash -c "$kill_tree_sn" || rc=$?
         # de mode: PID 1 is cosmic-session (exec chain) → the container goes
-        # Exited; shell mode: idle bash keeps it Up.
+        # Exited and the teardown SIGKILLs the exec'd sweeper itself (rc≠0 is
+        # success); shell mode: idle bash keeps it Up.
         st="$("$rt" inspect -f '{{.State.Status}}' cosmic-tty 2>/dev/null || true)"
+        if [ "$rc" -ne 0 ] && [ "$st" = running ]; then
+            echo "warning: cosmic-tty sweep failed — session may still be running" >&2
+        fi
         case "$st" in
             running) echo "cosmic-tty kept running (podman attach cosmic-tty)" ;;
             *)       echo "cosmic-tty exited (podman start cosmic-tty restarts it)" ;;
