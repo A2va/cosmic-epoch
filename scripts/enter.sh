@@ -7,18 +7,20 @@
 #   graphical terminal (WAYLAND_DISPLAY/DISPLAY set):
 #     mise run enter        systemd dev container + bash session (reuse the
 #                           running one; it stays up for 'app'/'compile'/
-#                           'install'; 'mise run stop' tears it down)
-#     mise run enter de     boot it, then run ./scripts/inside-de.sh (nested
-#                           session on the host compositor)
-#     mise run enter dm     boot it, then run ./scripts/inside-dm.sh (nested
-#                           greeter)
+#                           'install'; 'mise run stop' tears it down).
+#                           de|dm args enter too — a nested session needs the
+#                           components built+installed first, so it's started
+#                           manually inside: ./scripts/inside-de.sh (session
+#                           on the host compositor) or ./scripts/inside-dm.sh
+#                           (nested greeter)
 #   real VT (no compositor; login shell has XDG_VTNR / /dev/ttyN):
 #     mise run enter        VT session container + bash (toolbox-like HW
 #                           passthrough, no systemd)
 #     mise run enter de     VT session container → ./scripts/inside-de.sh
 #     mise run enter dm     greeter on a free host VT (rootful podman;
 #                           VT defaults to login VT + 1) → ./scripts/inside-dm.sh
-#   inside the container, the same modes still resolve sensibly.
+#   inside the container, enter is just a shell; run the inside-*.sh scripts
+#   directly.
 #
 # Component lists (compile/install defaults) come from mise.toml [env] —
 # mise is installed on the host and in the image, so nothing is forwarded.
@@ -33,13 +35,9 @@ case "$MODE" in
 *)        die "unknown mode: $MODE (enter|de|dm)" ;;
 esac
 
-# Inside the container: same modes, no runtime needed; VT modes can't run here.
+# Inside the container: just a shell — run ./scripts/inside-*.sh directly.
 if [ -f /.dockerenv ] || [ -n "${container:-}" ]; then
-    case "$MODE" in
-    ""|enter) exec bash ;;
-    de)       exec ./scripts/inside-de.sh ;;
-    dm)       exec ./scripts/inside-dm.sh ;;
-    esac
+    exec bash
 fi
 
 # TTY detection: graphical terminal (compositor env) → nested dev container;
@@ -47,11 +45,10 @@ fi
 # PAM sets neither on a bare VT login, so this is reliable.
 if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
     ensure_dev_container
-    case "$MODE" in
-    "") exec "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash ;;
-    de) exec "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" ./scripts/inside-de.sh ;;
-    dm) exec "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" ./scripts/inside-dm.sh ;;
-    esac
+    # enter just enters (de/dm included): a nested session needs the
+    # components built+installed first — run the inside-*.sh script manually.
+    [ -n "$MODE" ] && log "enter only — for the session: mise run compile (host), sudo mise run install (here), then ./scripts/inside-$MODE.sh"
+    exec "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
 elif [ -n "$(vtnr)" ]; then
     exec ./scripts/start.sh "${MODE:-shell}" "$@"
 else
