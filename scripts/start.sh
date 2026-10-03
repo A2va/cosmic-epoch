@@ -91,7 +91,10 @@ if [ "$SESSION" != dm ]; then
     # so the switch-back target is obvious from the session screen.
     log "VT tty$VTNR (session ${XDG_SESSION_ID:-?}, seat ${XDG_SEAT:-seat0})"
     log "session takes over THIS vt — switch back to your login with Ctrl+Alt+F$VTNR"
-    exec "${RT_CMD[@]}" run --rm -it --name cosmic-tty \
+    # No --rm: the container survives 'mise run stop' (session killed only),
+    # and a leftover shell stays inspectable. --replace clears an exited
+    # leftover so a rerun doesn't hit "name in use".
+    exec "${RT_CMD[@]}" run --replace -it --name cosmic-tty \
         --pid=host --ipc=host --network=host --cgroupns=host \
         --userns=keep-id --user "$(id -u):$(id -g)" \
         --cap-add SYS_TTY_CONFIG \
@@ -112,7 +115,7 @@ REUSED=0
 # (previous dm run) can be reused — inside-dm.sh tears down its old session
 # and restarts the greeter, no getty dance needed again.
 if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
-    die "rootless $CTR is running — 'mise run stop' first (dm needs the rootful store)"
+    die "rootless $CTR is running — 'mise run stop --rm' first (dm needs the rootful store)"
 elif sudo podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
     REUSED=1
     RT_CMD=(sudo podman)

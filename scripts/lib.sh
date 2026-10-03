@@ -5,13 +5,31 @@
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 
+# Run the interactive shell session and end the script with a sane status.
+# Interactive bash exits with its LAST COMMAND's status — 'exit'/Ctrl-D after
+# a failed command must not fail the mise task. 125 is the runtime's own
+# error code (podman/docker exec couldn't run): keep it.
+shell_exit() {
+    local st
+    set +e
+    if [ $# -gt 0 ]; then "$@"; else bash; fi
+    st=$?
+    set -e
+    [ "$st" -eq 125 ] && exit "$st"
+    exit 0
+}
+
 # Inside a container? /proc/1/environ has container=podman|docker injected by
-# the runtime and survives sudo's env_reset (the $container env var doesn't).
-# Fallback to the env var so non-root callers (can't read /proc/1/environ)
-# still get the right next error (e.g. install's "run me as root").
+# the runtime and survives sudo's env_reset (the $container env var doesn't) —
+# but only in the systemd dev container: the tty container runs --pid=host, so
+# its /proc/1 is the HOST init (unreadable, no container= there). Podman's
+# runtime-injected /run/.containerenv marker (tmpfs, not a fakeable repo file)
+# covers that one; /.dockerenv covers docker. Env var fallback so non-root
+# callers still get the right next error (e.g. install's "run me as root").
 in_container() {
     grep -zqa '^container=' /proc/1/environ 2>/dev/null \
-        || [ -f /.dockerenv ] || [ -n "${container:-}" ]
+        || [ -f /run/.containerenv ] || [ -f /.dockerenv ] \
+        || [ -n "${container:-}" ]
 }
 
 # Container runtime: podman preferred (rootless, keep-id), docker fallback.
@@ -84,7 +102,7 @@ gen_xkb_pack() {
 # Create (or reuse) the systemd dev container. Sets globals for the caller:
 #   RT_CMD (possibly sudo-prefixed), RT_BIN, EXEC, CTR, IMG, state, REUSED.
 # No cleanup trap on purpose: the container must outlive this call so
-# 'enter' → 'app' → 'compile'/'install' can all reuse it; 'mise run stop'
+# 'enter' → 'app' → 'compile'/'install' can all reuse it; 'mise run stop --rm'
 # tears it down.
 ensure_dev_container() {
     RT_CMD=()

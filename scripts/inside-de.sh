@@ -92,7 +92,10 @@ log out/in (or reboot) the HOST so its compositor recreates it, then rerun"
     sudo chmod 0711 /run/host-user 2>/dev/null || true
     sudo chmod 0666 "$HOST_SOCK" 2>/dev/null || true
 elif [ -z "${DISPLAY:-}" ]; then
-    die "no WAYLAND_DISPLAY or DISPLAY — run 'mise run de' inside the dev container"
+    # Getting here in the tty container means the session env was stripped —
+    # almost always sudo: env_reset drops XDG_SESSION_ID/XDG_VTNR, so the tty
+    # branch above can't match. The session must run as dev, never as root.
+    die "no WAYLAND_DISPLAY or DISPLAY — run 'mise run de' (without sudo) inside the dev container"
 fi
 
 # start-cosmic needs dev's user manager bus; linger is baked in but it takes a moment.

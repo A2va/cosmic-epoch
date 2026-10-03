@@ -7,7 +7,7 @@
 #   graphical terminal (WAYLAND_DISPLAY/DISPLAY set):
 #     mise run enter        systemd dev container + bash session (reuse the
 #                           running one; it stays up for 'app'/'compile'/
-#                           'install'; 'mise run stop' tears it down).
+#                           'install'; 'mise run stop --rm' tears it down).
 #                           de|dm args enter too — a nested session needs the
 #                           components built+installed first, so it's started
 #                           manually inside: 'mise run de' (session on the
@@ -36,7 +36,7 @@ esac
 
 # Inside the container: just a shell — run ./scripts/inside-*.sh directly.
 if in_container; then
-    exec bash
+    shell_exit
 fi
 
 # TTY detection: graphical terminal (compositor env) → nested dev container;
@@ -47,7 +47,7 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
     # enter just enters (de/dm included): a nested session needs the
     # components built+installed first — run the inside-*.sh script manually.
     [ -n "$MODE" ] && log "enter only — for the session: mise run compile (host), sudo mise run install (here), then mise run $MODE"
-    exec "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
+    shell_exit "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
 elif [ -n "$(vtnr)" ]; then
     exec ./scripts/start.sh "${MODE:-shell}" "$@"
 else
