@@ -16,29 +16,42 @@ for a in "$@"; do
     esac
 done
 
-# SIGKILL every cosmic-* process inside a cgroup-v2 subtree — and ONLY there.
+# Stop every cosmic-* process inside a cgroup-v2 subtree — and ONLY there.
 # The tty container runs --pid=host, so a plain `pkill -u <uid>` would also
 # match the HOST's own cosmic processes (e.g. a real COSMIC desktop running
 # as the same uid); the container's cgroup subtree is the exact "inside this
 # container" boundary. cgroup.procs lists only direct members, so recurse
 # into sub-cgroups (the systemd dev container keeps the session under
 # user@1000.service sub-scopes). Self-contained: runs via eval or exec.
+#
+# Graceful FIRST: SIGTERM cosmic-session (it tears down cosmic-comp cleanly,
+# and a cleanly exiting comp restores the KMS/CRTC state it saved at takeover).
+# A bare SIGKILL skips that restore and leaves the kernel's last committed
+# gamma/CTM in place — display-wide washed-out colors on the host until
+# reboot. 5s grace, then SIGKILL stragglers.
 kill_tree_sn='
 cg="$(sed -n "s/^0:://p" /proc/$$/cgroup)"
 [ -n "$cg" ] || { echo "no cgroup v2 path for pid $$ — refusing an unscoped kill" >&2; exit 1; }
-kill_tree() {
+list_cosmic() {
     local d="/sys/fs/cgroup$1" p sub
-    [ -r "$d/cgroup.procs" ] || { echo "cannot read $d/cgroup.procs" >&2; exit 1; }
+    [ -r "$d/cgroup.procs" ] || return 0
     while read -r p; do
-        case "$(cat "/proc/$p/comm" 2>/dev/null)" in
-            cosmic-*) kill -KILL "$p" 2>/dev/null || true ;;
-        esac
+        case "$(cat "/proc/$p/comm" 2>/dev/null)" in cosmic-*) echo "$p" ;; esac
     done < "$d/cgroup.procs"
     for sub in "$d"/*/; do
-        [ -d "$sub" ] && kill_tree "${sub#/sys/fs/cgroup}"
+        [ -d "$sub" ] && list_cosmic "${sub#/sys/fs/cgroup}"
     done
 }
-kill_tree "$cg"
+for p in $(list_cosmic "$cg"); do
+    [ "$(cat /proc/$p/comm 2>/dev/null)" = cosmic-session ] && kill -TERM "$p" 2>/dev/null || true
+done
+for _ in $(seq 1 50); do
+    [ -z "$(list_cosmic "$cg")" ] && break
+    sleep 0.1
+done
+for p in $(list_cosmic "$cg"); do
+    kill -KILL "$p" 2>/dev/null || true
+done
 '
 
 # systemd dev container teardown: polite target stop first, then stragglers
