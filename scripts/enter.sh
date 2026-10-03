@@ -10,9 +10,8 @@
 #                           'install'; 'mise run stop' tears it down).
 #                           de|dm args enter too — a nested session needs the
 #                           components built+installed first, so it's started
-#                           manually inside: ./scripts/inside-de.sh (session
-#                           on the host compositor) or ./scripts/inside-dm.sh
-#                           (nested greeter)
+#                           manually inside: 'mise run de' (session on the
+#                           host compositor) or 'mise run dm' (nested greeter)
 #   real VT (no compositor; login shell has XDG_VTNR / /dev/ttyN):
 #     mise run enter        VT session container + bash (toolbox-like HW
 #                           passthrough, no systemd)
@@ -47,7 +46,7 @@ if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
     ensure_dev_container
     # enter just enters (de/dm included): a nested session needs the
     # components built+installed first — run the inside-*.sh script manually.
-    [ -n "$MODE" ] && log "enter only — for the session: mise run compile (host), sudo mise run install (here), then ./scripts/inside-$MODE.sh"
+    [ -n "$MODE" ] && log "enter only — for the session: mise run compile (host), sudo mise run install (here), then mise run $MODE"
     exec "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
 elif [ -n "$(vtnr)" ]; then
     exec ./scripts/start.sh "${MODE:-shell}" "$@"

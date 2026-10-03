@@ -11,11 +11,21 @@ COMPONENTS_DE = "cosmic-comp cosmic-session cosmic-panel cosmic-applets cosmic-a
 COMPONENTS_DM = "{{env.COMPONENTS_DE}} cosmic-greeter"
 
 [tasks.enter]
-description = "Dev container: graphical = bash session (reuses running container); VT = session test. Args: de|dm run the matching session script (nested or on the VT)"
+description = "Dev container: graphical = bash session (reuses running container; de/dm also just enter — start sessions with 'mise run de|dm' inside); VT = session test (de|dm run the matching session script)"
 raw = true
 run = """
 ./scripts/enter.sh "$@"
 """
+
+[tasks.de]
+description = "Run the COSMIC session on the host compositor — inside the dev container (host terminal: 'mise run enter' first)"
+raw = true
+run = "./scripts/inside-de.sh \"$@\""
+
+[tasks.dm]
+description = "Run the COSMIC greeter — inside the dev container (host terminal: 'mise run enter' first; real-VT greeter: 'mise run enter dm')"
+raw = true
+run = "./scripts/inside-dm.sh \"$@\""
 
 [tasks.app]
 description = "Run a built COSMIC binary/app as a window on the host compositor"

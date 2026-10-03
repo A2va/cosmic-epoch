@@ -26,6 +26,11 @@ set -euo pipefail
 
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+. scripts/lib.sh
+
+# Container-only: on the host the binary check would lie ("build + install"),
+# or — with COSMIC installed there — the tty branch would start a host session.
+in_container || die "run me inside the dev container (mise run enter, then mise run de)"
 
 # TTY detection: only the tty container passes the host session's VT node
 # through (--device /dev/tty$VTNR); the systemd container has no kernel VTs.
@@ -87,7 +92,7 @@ log out/in (or reboot) the HOST so its compositor recreates it, then rerun"
     sudo chmod 0711 /run/host-user 2>/dev/null || true
     sudo chmod 0666 "$HOST_SOCK" 2>/dev/null || true
 elif [ -z "${DISPLAY:-}" ]; then
-    die "no WAYLAND_DISPLAY or DISPLAY — start me via './scripts/enter.sh de'"
+    die "no WAYLAND_DISPLAY or DISPLAY — run 'mise run de' inside the dev container"
 fi
 
 # start-cosmic needs dev's user manager bus; linger is baked in but it takes a moment.

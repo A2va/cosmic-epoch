@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # inside-dm.sh — full display-manager boot inside the devcontainer,
-# driven by systemd. Start from the host with `scripts/enter.sh dm`:
+# driven by systemd. Nested: 'mise run enter' on the host, then 'mise run dm'
+# inside; real-VT greeter: 'mise run enter dm' on a host VT.
 #
 #   systemd
 #     ├─ cosmic-greeter-daemon.service  (system bus: user list)
@@ -20,12 +21,16 @@ set -euo pipefail
 
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+. scripts/lib.sh
+
+# Container-only: the host has none of what this drives (systemd units, dev user).
+in_container || die "run me inside the dev container (mise run enter, then mise run dm)"
 
 for bin in cosmic-comp cosmic-greeter cosmic-greeter-daemon cosmic-session start-cosmic; do
     command -v "$bin" >/dev/null || die "missing binary: $bin (build + install COSMIC first)"
 done
 [ -f /usr/share/dbus-1/system.d/com.system76.CosmicGreeter.conf ] \
-    || die "dbus policy missing — run 'sudo ./scripts/install.sh cosmic-greeter'"
+    || die "dbus policy missing — run 'sudo mise run install dm' (installs cosmic-greeter)"
 
 state=""
 for _ in $(seq 1 100); do
@@ -35,7 +40,7 @@ for _ in $(seq 1 100); do
 done
 case "$state" in
     running|degraded) ;;
-    *) die "systemd is not managing this container (state: ${state:-none}) — start via 'scripts/enter.sh dm'" ;;
+    *) die "systemd is not managing this container (state: ${state:-none}) — 'mise run enter dm' on a VT, or 'mise run enter' then 'mise run dm' (nested)" ;;
 esac
 
 # greetd scrubs its env, so the host display must go via pam_env
@@ -112,7 +117,7 @@ log out/in (or reboot) the HOST so its compositor recreates it, then rerun"
 elif [ -n "${DISPLAY:-}" ]; then
     HOST_ENV="DISPLAY=$DISPLAY"
 else
-    die "no WAYLAND_DISPLAY or DISPLAY — start me via 'scripts/enter.sh dm'"
+    die "no WAYLAND_DISPLAY or DISPLAY — run 'mise run dm' inside the dev container"
 fi
 
 # Replace (not append) so reruns don't stack entries. Only what's
