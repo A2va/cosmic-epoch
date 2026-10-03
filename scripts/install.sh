@@ -11,8 +11,10 @@ cd "$(dirname "$0")/.."
 die() { echo "error: $*" >&2; exit 1; }
 
 # Trust boundary: this script writes the live system, so verify it in the
-# container, not by env vars someone could fake on the host.
-[ -d "$PWD/.devcontainer" ] && [ -f /.dockerenv -o -n "${container:-}" ] \
+# container, not by env vars someone could fake on the host. in_container
+# reads /proc/1/environ: the $container env var is dropped by sudo's
+# env_reset, so 'sudo mise run install' inside the container failed the old check.
+[ -d "$PWD/.devcontainer" ] && in_container \
     || die "install must run inside the dev container (mise run enter, then mise run install)"
 
 [ "$(id -u)" = 0 ] || die "run me as root: sudo mise run install"
@@ -23,7 +25,7 @@ comps="$(_collect "$@")"
 
 # Install logic identical to the old justfile `_install` recipe.
 for c in $comps; do
-    read -r kind profvar <<<"$(_layout "$c")"
+    IFS=: read -r kind profvar <<<"$(_layout "$c")"
     case "$kind" in
     just-cargo)
         dd="$d"; [ "$c" = pop-launcher ] && dd=0
@@ -49,7 +51,10 @@ chown -R dev:dev /home/dev/.config /home/dev/.local
 
 # pop-launcher: its plugin dir must be user-writable (it writes recovered
 # plugin state there); a root-owned copy breaks the launcher silently.
-[ "$d" = 1 ] && chown -R dev:dev /home/dev/.local/share/pop-launcher
+# The dir only appears on the launcher's first run — absent = nothing to fix.
+if [ "$d" = 1 ] && [ -d /home/dev/.local/share/pop-launcher ]; then
+    chown -R dev:dev /home/dev/.local/share/pop-launcher
+fi
 
 # cosmic-greeter ships the DM assets the deb would install (units, tmpfiles,
 # PAM stack), trimmed like `ci` did. Staging runs (COSMIC_ROOTDIR) must not

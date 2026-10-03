@@ -36,7 +36,7 @@ case "$MODE" in
 esac
 
 # Inside the container: just a shell — run ./scripts/inside-*.sh directly.
-if [ -f /.dockerenv ] || [ -n "${container:-}" ]; then
+if in_container; then
     exec bash
 fi
 

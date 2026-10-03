@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib.sh
 
-if [ -f /.dockerenv ] || [ -n "${container:-}" ]; then
+if in_container; then
     # Inside: sweep the user session (polite target stop, then stragglers).
     sudo -u dev env XDG_RUNTIME_DIR=/run/user/1000 \
             DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \

@@ -11,7 +11,7 @@ d="${DEBUG:-1}"
 [ "$d" = 0 ] || d=1
 
 for c in $(_collect "$@"); do
-    read -r kind profvar <<<"$(_layout "$c")"
+    IFS=: read -r kind profvar <<<"$(_layout "$c")"
     case "$kind" in
     just-cargo)
         prof="$d"; [ "$c" = pop-launcher ] && prof=0

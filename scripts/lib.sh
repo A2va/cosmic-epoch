@@ -5,6 +5,15 @@
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 
+# Inside a container? /proc/1/environ has container=podman|docker injected by
+# the runtime and survives sudo's env_reset (the $container env var doesn't).
+# Fallback to the env var so non-root callers (can't read /proc/1/environ)
+# still get the right next error (e.g. install's "run me as root").
+in_container() {
+    grep -zqa '^container=' /proc/1/environ 2>/dev/null \
+        || [ -f /.dockerenv ] || [ -n "${container:-}" ]
+}
+
 # Container runtime: podman preferred (rootless, keep-id), docker fallback.
 runtime() {
     command -v podman >/dev/null 2>&1 && { echo podman; return; }
