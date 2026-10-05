@@ -31,7 +31,7 @@ MODE="${1:-}"
 if [ $# -gt 0 ]; then shift; fi
 case "$MODE" in
 ""|de|dm) ;;
-*)        die "unknown mode: $MODE (enter|de|dm)" ;;
+*)        die "unknown mode: $MODE (de|dm)" ;;
 esac
 
 # Inside the container: just a shell — run ./scripts/inside-*.sh directly.
@@ -44,8 +44,7 @@ fi
 # PAM sets neither on a bare VT login, so this is reliable.
 if [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; then
     ensure_dev_container
-    # enter just enters (de/dm included): a nested session needs the
-    # components built+installed first — run the inside-*.sh script manually.
+    # enter just enters a bash terminal
     [ -n "$MODE" ] && log "enter only — for the session: mise run compile (host), sudo mise run install (here), then mise run $MODE"
     shell_exit "${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" bash
 elif [ -n "$(vtnr)" ]; then

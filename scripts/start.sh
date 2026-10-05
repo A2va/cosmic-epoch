@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# start.sh — boot the VT test containers and run the session inside them.
+# start.sh — boot the VT test container and drop into a shell inside it.
 # Called by scripts/enter.sh when it detects a real host VT; run from a
 # logged-in VT (Ctrl+Alt+F<N> on the HOST, confirm with 'tty').
 #
-#   start.sh shell|de   rootless podman, plain container (no systemd):
-#                       toolbox-like passthrough so cosmic-comp gets the host
-#                       seat, DRM/input devices and udev tags directly. The
-#                       session uses the host logind session (libseat backend),
-#                       dodging the greetd CAP_SYS_TTY_CONFIG problem below.
-#                       execs bash (shell) or ./scripts/inside-de.sh (de).
-#   start.sh dm         systemd-booted dm container (greetd + cosmic-greeter
-#                       + daemon) with the host VT + DRM + input devices
-#                       passed through, so the greeter takes over
-#                       /dev/tty$N via DRM/KMS like on bare metal. The image
-#                       bakes vt="none" (no kernel VTs in a plain container);
-#                       inside-dm.sh rewrites it to the greeter VT at runtime.
-#                       execs ./scripts/inside-dm.sh.
+#   start.sh          rootless podman, plain container (no systemd):
+#                     toolbox-like passthrough so cosmic-comp gets the host
+#                     seat, DRM/input devices and udev tags directly. The
+#                     session uses the host logind session (libseat backend),
+#                     dodging the greetd CAP_SYS_TTY_CONFIG problem below.
+#                     Drops into bash; run ./scripts/inside-de.sh for the
+#                     session.
+#   start.sh dm [VT]  systemd-booted dm container (greetd + cosmic-greeter
+#                     + daemon) with the host VT + DRM + input devices
+#                     passed through, so the greeter takes over
+#                     /dev/tty$N via DRM/KMS like on bare metal. The image
+#                     bakes vt="none" (no kernel VTs in a plain container);
+#                     inside-dm.sh rewrites it to the greeter VT at runtime.
+#                     Drops into bash; run ./scripts/inside-dm.sh for the
+#                     greeter.
 #
 # greetd does raw VT ioctls (KDSETMODE, VT_ACTIVATE) on /dev/tty$N. Two things
 # must be true for that to work:
@@ -37,12 +39,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 . scripts/lib.sh
 
-SESSION="${1:-shell}"
+MODE="${1:-}"
 if [ $# -gt 0 ]; then shift; fi
-case "$SESSION" in
-shell|de) ;;
-dm)       ;;
-*)        die "unknown session: $SESSION (shell|de|dm)" ;;
+case "$MODE" in
+""|shell) SESSION=shell ;; # 'shell' kept as a no-op alias (enter.sh used to pass it)
+dm)       SESSION=dm ;;
+*)        die "unknown session: $MODE (nothing|dm)" ;;
 esac
 
 if command -v podman >/dev/null 2>&1; then RT_CMD=(podman); else RT_CMD=(docker); fi
@@ -78,15 +80,10 @@ if [ "$SESSION" != dm ]; then
     for dbg in RUST_LOG RUST_BACKTRACE; do
         [ -n "${!dbg:-}" ] && ENVS+=(-e "$dbg=${!dbg}")
     done
-    case "$SESSION" in
-    shell)
-        echo "tty container (VT tty$VTNR). Then:"
-        echo "  sudo mise run install           # full DE + config pack"
-        echo "  ./scripts/inside-de.sh          # session: comp, panel, launcher, bg"
-        CMD=(bash)
-        ;;
-    de) CMD=(./scripts/inside-de.sh) ;;
-    esac
+    echo "tty container (VT tty$VTNR). Then:"
+    echo "  sudo mise run install           # full DE + config pack"
+    echo "  ./scripts/inside-de.sh          # session: comp, panel, launcher, bg"
+    CMD=(bash)
     # cosmic-comp handles Ctrl+Alt+F1..F12 itself; print where we came from
     # so the switch-back target is obvious from the session screen.
     log "VT tty$VTNR (session ${XDG_SESSION_ID:-?}, seat ${XDG_SEAT:-seat0})"
@@ -108,10 +105,9 @@ fi
 LOGIN_VT="$(vtnr)"
 [ -n "$LOGIN_VT" ] || die "no VT detected (XDG_VTNR empty, stdin $(tty 2>/dev/null || echo unknown)) — Ctrl+Alt+F3, log in on the HOST, confirm with 'tty'/'loginctl list-sessions', then rerun"
 
-CTR=cosmic-dev
-EXEC=()
+CTR=cosmic-tty
 REUSED=0
-# A rootless cosmic-dev can't serve dm (needs rootful); a rootful leftover
+# A rootless cosmic-tty can't serve dm (needs rootful); a rootful leftover
 # (previous dm run) can be reused — inside-dm.sh tears down its old session
 # and restarts the greeter, no getty dance needed again.
 if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
@@ -119,7 +115,6 @@ if podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
 elif sudo podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CTR"; then
     REUSED=1
     RT_CMD=(sudo podman)
-    EXEC=(-u dev)
     log "reusing rootful container $CTR"
 fi
 
@@ -216,7 +211,7 @@ if [ "$REUSED" = 0 ]; then
     fi
     # greetd (root) needs CAP_SYS_TTY_CONFIG for KDSETMODE/VT_ACTIVATE on
     # /dev/tty$GREETER_VT. Only works under rootful podman (sudo).
-    RUNARGS=(--security-opt label=disable --cap-add SYS_TTY_CONFIG "${DEVS[@]}")
+    RUNARGS=(--security-opt label=disable --cap-add SYS_TTY_CONFIG --cap-add SYS_ADMIN "${DEVS[@]}")
     # Tell inside-dm.sh to rewrite greetd's vt and skip the host-WAYLAND/DISPLAY
     # branch (no host compositor here — the greeter owns the VT via DRM/KMS).
     ENVS+=(-e "XDG_VTNR=$GREETER_VT")
@@ -226,7 +221,7 @@ if [ "$REUSED" = 0 ]; then
     RT_CMD=(sudo "${RT_CMD[@]}")
     "${RT_CMD[@]}" build -f .devcontainer/Dockerfile -t "$IMG" .
     log "dm: login VT tty$LOGIN_VT, greeter VT tty$GREETER_VT (seat ${XDG_SEAT:-seat0}) — sudo prompt for rootful podman"
-    log "if the greeter grabs input and Ctrl+Alt+F$LOGIN_VT dies: ssh in, 'sudo podman exec cosmic-dev systemctl stop display-manager.service'"
+    log "if the greeter grabs input and Ctrl+Alt+F$LOGIN_VT dies: ssh in, 'sudo podman exec cosmic-tty systemctl stop display-manager.service'"
 fi
 
 # systemd inside the container: tmpfs on /run & friends, writable cgroup fs,
@@ -273,8 +268,10 @@ if [ "$REUSED" = 0 ]; then
             || echo "warning: ldconfig failed in container — EGL may miss the nvidia vendor lib" >&2
     fi
     # after inside-dm.sh starts the greeter, switch to it: Ctrl+Alt+F$GREETER_VT
+    log "then: mise run dm # greeter on VT $GREETER_VT (switch: Ctrl+Alt+F$GREETER_VT)"
 fi
 
 # Plain call (no exec): the EXIT trap must survive to clean up the container
-# and restore the greeter getty when inside-dm.sh ends.
-"${RT_CMD[@]}" exec -it "${EXEC[@]}" "$CTR" ./scripts/inside-dm.sh
+# and restore the greeter getty when the shell ends.
+[ "$REUSED" = 1 ] && log "then: mise run dm"
+"${RT_CMD[@]}" exec -it -u dev "$CTR" bash
