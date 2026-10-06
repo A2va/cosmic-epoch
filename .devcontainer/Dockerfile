@@ -1,6 +1,12 @@
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+# 'mise run install' puts pop-launcher in dev's ~/.local/bin (its justfile
+# ignores prefix), and cosmic-launcher spawns it as a bare `pop-launcher`
+# via PATH. Without this, a launcher started from a plain `enter` shell
+# finds no pop-launcher, gets no search responses, and never shows its
+# window — silently. inside-de.sh sets the same PATH for the DE session.
+ENV PATH="/home/dev/.local/bin:${PATH}"
 
 # trusted=yes skips Pop archive key verification; fine for a disposable dev image
 RUN echo "deb [trusted=yes] https://apt.pop-os.org/release noble main" \

@@ -47,7 +47,7 @@ dm)       SESSION=dm ;;
 *)        die "unknown session: $MODE (nothing|dm)" ;;
 esac
 
-if command -v podman >/dev/null 2>&1; then RT_CMD=(podman); else RT_CMD=(docker); fi
+RT_CMD=("$(runtime)")
 RT_BIN="${RT_CMD[0]}"
 IMG=localhost/cosmic-build-env
 RT_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
@@ -248,17 +248,7 @@ if [ "$REUSED" = 0 ]; then
     }
     trap cleanup EXIT
 
-    # wait for systemd to finish booting
-    state=""
-    for _ in $(seq 1 120); do
-        state="$("${RT_CMD[@]}" exec "$CTR" systemctl is-system-running 2>/dev/null || true)"
-        case "$state" in running|degraded) break ;; esac
-        sleep 0.5
-    done
-    case "$state" in
-        running|degraded) ;;
-        *) "${RT_CMD[@]}" logs "$CTR" >&2 || true; die "systemd did not boot (state: ${state:-none})" ;;
-    esac
+    wait_systemd_boot "$CTR"
     "${RT_CMD[@]}" exec "$CTR" chown -R dev:dev /home/dev/.cargo >/dev/null 2>&1 || true
 
     # NVIDIA passthrough: ldconfig registers the host-mounted vendor GL/EGL

@@ -28,7 +28,7 @@ raw = true
 run = "./scripts/inside-dm.sh \"$@\""
 
 [tasks.app]
-description = "Run a built COSMIC binary/app as a window on the host compositor"
+description = "Run a COSMIC component (cargo run) or binary as a window on the host compositor. DEBUG=0 release"
 raw = true
 run = """
 ./scripts/app.sh "$@"

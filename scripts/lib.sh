@@ -99,14 +99,28 @@ gen_xkb_pack() {
     fi
 }
 
+# Wait (up to ~60s) for systemd in container $1 to finish booting; die with
+# container logs if it doesn't reach running|degraded.
+wait_systemd_boot() {
+    local state="" _
+    for _ in $(seq 1 120); do
+        state="$("${RT_CMD[@]}" exec "$1" systemctl is-system-running 2>/dev/null || true)"
+        case "$state" in running|degraded) break ;; esac
+        sleep 0.5
+    done
+    case "$state" in
+        running|degraded) ;;
+        *) "${RT_CMD[@]}" logs "$1" >&2 || true; die "systemd did not boot (state: ${state:-none})" ;;
+    esac
+}
+
 # Create (or reuse) the systemd dev container. Sets globals for the caller:
 #   RT_CMD (possibly sudo-prefixed), RT_BIN, EXEC, CTR, IMG, state, REUSED.
 # No cleanup trap on purpose: the container must outlive this call so
 # 'enter' → 'app' → 'compile'/'install' can all reuse it; 'mise run stop --rm'
 # tears it down.
 ensure_dev_container() {
-    RT_CMD=()
-    if command -v podman >/dev/null 2>&1; then RT_CMD=(podman); else RT_CMD=(docker); fi
+    RT_CMD=("$(runtime)")
     RT_BIN="${RT_CMD[0]}" # runtime name, not the sudo prefix
     RUNARGS=(--security-opt label=disable)
     EXEC=()
@@ -176,18 +190,7 @@ ensure_dev_container() {
         "${MOUNTS[@]}" "${ENVS[@]}" -w /cosmic-epoch --entrypoint /sbin/init "$IMG" \
         || die "systemd container failed to start"
 
-    # wait for systemd to finish booting
-    state=""
-    local _
-    for _ in $(seq 1 120); do
-        state="$("${RT_CMD[@]}" exec "$CTR" systemctl is-system-running 2>/dev/null || true)"
-        case "$state" in running|degraded) break ;; esac
-        sleep 0.5
-    done
-    case "$state" in
-        running|degraded) ;;
-        *) "${RT_CMD[@]}" logs "$CTR" >&2 || true; die "systemd did not boot (state: ${state:-none})" ;;
-    esac
+    wait_systemd_boot "$CTR"
     "${RT_CMD[@]}" exec "$CTR" chown -R dev:dev /home/dev/.cargo >/dev/null 2>&1 || true
 }
 
