@@ -2,7 +2,7 @@
   "name": "cosmic-epoch",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": ".",
+    "context": "..",
   },
   "remoteUser": "dev",
   // Boot systemd as PID 1 (the Dockerfile CMD). tini must not wrap init.
