@@ -121,7 +121,8 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
     && ln -sf /usr/local/share/mise/installs/just/latest/just /usr/local/bin/just \
     && ln -sf "$RUSTUP_HOME"/toolchains/*/bin/cargo /usr/local/bin/cargo \
     && ln -sf "$RUSTUP_HOME"/toolchains/*/bin/rustc /usr/local/bin/rustc \
-    && chmod -R a+rX /usr/local/share/mise /usr/local/share/rustup /usr/local/share/cargo
+    && chmod -R a+rX /usr/local/share/mise /usr/local/share/rustup /usr/local/share/cargo \
+    && chown -R dev:dev /usr/local/share/mise /usr/local/share/rustup /usr/local/share/cargo
 
 WORKDIR /cosmic-epoch
 # PID 1 by default; a shell is one exec away.

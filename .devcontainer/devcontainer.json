@@ -34,5 +34,5 @@
     "XDG_RUNTIME_DIR": "/run/host-user",
     "JUST_RUNTIME_DIR": "/home/dev/.cache/just",
   },
-  "postCreateCommand": ["sudo", "chown", "-R", "dev:dev", "/home/dev/.cargo"],
+  "postCreateCommand": ["sudo", "chown", "-R", "dev:dev", "/home/dev/.cargo", "/usr/local/share/rustup", "/usr/local/share/cargo", "/usr/local/share/mise"]
 }
