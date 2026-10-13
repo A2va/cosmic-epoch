@@ -34,11 +34,24 @@ for c in $comps; do
     IFS=: read -r kind profvar <<<"$(_layout "$c")"
     case "$kind" in
     just-cargo)
-        dd="$d"; [ "$c" = pop-launcher ] && dd=0
+        # Updated submodules dropped the `debug` variable (just errors on
+        # overriding an unknown one) and hardcode the release binary in
+        # bin-src. When declared, override bin-src with the debug path
+        # instead — just 1.58 passes overrides through unevaluated, so the
+        # value must be the plain relative path.
+        dbg=""
+        f="$c/"[jJ]ustfile
+        if grep -qaE '^[[:space:]]*debug[[:space:]]*:?[:+]?=' $f 2>/dev/null; then
+            dd="$d"; [ "$c" = pop-launcher ] && dd=0
+            dbg="debug=$dd"
+        elif [ "$d" = 1 ] && grep -qaE '^[[:space:]]*bin-src[[:space:]]*:=' $f 2>/dev/null; then
+            binname=$(sed -n "s/^[[:space:]]*name[[:space:]]*:=[[:space:]]*'\\([^']*\\)'.*/\\1/p" $f | head -1)
+            [ -n "$binname" ] && dbg="bin-src=target/debug/$binname"
+        fi
         if [ "$c" = pop-launcher ]; then
-            (cd "$c" && HOME=/home/dev just "debug=$dd" install)
+            (cd "$c" && HOME=/home/dev just ${dbg:+"$dbg"} install)
         else
-            (cd "$c" && HOME=/home/dev just "prefix=${COSMIC_PREFIX:-/usr}" "debug=$dd" install)
+            (cd "$c" && HOME=/home/dev just "prefix=${COSMIC_PREFIX:-/usr}" ${dbg:+"$dbg"} install)
         fi
         ;;
     just-data)
