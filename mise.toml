@@ -7,7 +7,7 @@ just = "latest"
 # COSMIC components compiled/installed by the dev tasks (build order).
 # DE sessions: greedy tasks that want compile+install as one unit are separate.
 [env]
-COMPONENTS_DE = "cosmic-comp cosmic-session cosmic-osk cosmic-panel cosmic-applets cosmic-applibrary cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
+COMPONENTS_DE = "cosmic-comp cosmic-session cosmic-osk cosmic-panel cosmic-applets cosmic-app-library cosmic-launcher pop-launcher cosmic-icons cosmic-workspaces-epoch cosmic-settings-daemon cosmic-notifications cosmic-bg"
 COMPONENTS_DM = "{{env.COMPONENTS_DE}} cosmic-greeter"
 # DEBUG = 1
 
