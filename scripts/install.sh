@@ -46,12 +46,28 @@ for c in $comps; do
             dbg="debug=$dd"
         elif [ "$d" = 1 ] && grep -qaE '^[[:space:]]*bin-src[[:space:]]*:=' $f 2>/dev/null; then
             binname=$(sed -n "s/^[[:space:]]*name[[:space:]]*:=[[:space:]]*'\\([^']*\\)'.*/\\1/p" $f | head -1)
-            [ -n "$binname" ] && dbg="bin-src=target/debug/$binname"
+            if [ -n "$binname" ]; then
+                dbg="bin-src=target/debug/$binname"
+                # Extra binaries like the cosmic-files applet hardcode their
+                # release path in another *-src var the same way; resolve
+                # each via just and override it with the flipped path so the
+                # value matches the var expression (not just the name var).
+                for var in $(grep -oaE '^[[:space:]]*[a-zA-Z]+-src[[:space:]]*:=' $f 2>/dev/null | awk '{print $1}'); do
+                    case "$var" in
+                        bin-src|desktop-src|metainfo-src|icons-src) continue ;;
+                    esac
+                    val=$( (cd "$c" && HOME=/home/dev just --evaluate "$var") 2>/dev/null ) || continue
+                    [ "${val/release/}" != "$val" ] || continue
+                    dbg="$dbg $var=${val/release/debug}"
+                done
+            fi
         fi
+        # dbg may hold several overrides (bin-src + applet-src) — just needs
+        # them as separate args, hence unquoted (no spaces in paths here).
         if [ "$c" = pop-launcher ]; then
-            (cd "$c" && HOME=/home/dev just ${dbg:+"$dbg"} install)
+            (cd "$c" && HOME=/home/dev just ${dbg} install)
         else
-            (cd "$c" && HOME=/home/dev just "prefix=${COSMIC_PREFIX:-/usr}" ${dbg:+"$dbg"} install)
+            (cd "$c" && HOME=/home/dev just "prefix=${COSMIC_PREFIX:-/usr}" ${dbg} install)
         fi
         ;;
     just-data)
