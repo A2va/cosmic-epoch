@@ -124,6 +124,12 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
     && chmod -R a+rX /usr/local/share/mise /usr/local/share/rustup /usr/local/share/cargo \
     && chown -R dev:dev /usr/local/share/mise /usr/local/share/rustup /usr/local/share/cargo
 
+# cosmic-icons is a submodule, allowed into the context by .dockerignore but
+# never otherwise copied in; install its icons system-wide at build time.
+COPY cosmic-icons /tmp/cosmic-icons
+RUN cd /tmp/cosmic-icons && just install \
+    && rm -rf /tmp/cosmic-icons
+
 WORKDIR /cosmic-epoch
 # PID 1 by default; a shell is one exec away.
 CMD ["/sbin/init"]
