@@ -42,6 +42,13 @@ run = """
 ./scripts/compile.sh "$@"
 """
 
+[tasks.clean]
+description = "Remove build artifacts (target/, make clean). Nothing = all; args = components or groups 'de'/'dm'"
+raw = true
+run = """
+./scripts/clean.sh "$@"
+"""
+
 [tasks.install]
 description = "Install COSMIC components into the dev container (container only). Nothing = all DE + config pack"
 raw = true
