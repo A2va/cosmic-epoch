@@ -40,6 +40,7 @@ for c in $comps; do
         # instead — just 1.58 passes overrides through unevaluated, so the
         # value must be the plain relative path.
         dbg=""
+        tgt_env=()
         f="$c/"[jJ]ustfile
         if grep -qaE '^[[:space:]]*debug[[:space:]]*:?[:+]?=' $f 2>/dev/null; then
             dd="$d"; [ "$c" = pop-launcher ] && dd=0
@@ -61,13 +62,40 @@ for c in $comps; do
                     dbg="$dbg $var=${val/release/debug}"
                 done
             fi
+        elif [ "$d" = 1 ]; then
+            # Third hardcode style (cosmic-session, cosmic-osd, cosmic-settings,
+            # cosmic-initial-setup): the release path sits inline in the install
+            # recipe with no `debug`/`bin-src` variable to override. Patching
+            # the file would break git pulls; instead use the CARGO_TARGET_DIR
+            # they read at the top (cargo-target-dir := env('CARGO_TARGET_DIR',
+            # 'target')): stage a '.debug-view' whose release/ holds symlinks to
+            # the debug artifacts and point install at it. Install recipes
+            # never build, so the view is read-only for them.
+            if grep -qaE '\}\}[[:space:]]*/?release|target-dir[[:space:]]*/[[:space:]]*.release.' $f 2>/dev/null; then
+                [ -d "$c/target/debug" ] || die "no debug build of $c (mise run compile $c); DEBUG=1 must not silently install release — use DEBUG=0 for that"
+                view="$PWD/$c/target/.debug-view"
+                rm -rf "$view"
+                mkdir -p "$view/release"
+                found=""
+                for b in "$c"/target/debug/*; do
+                    [ -f "$b" ] && [ -x "$b" ] || continue
+                    ln -sf "$(readlink -f "$b")" "$view/release/$(basename "$b")"
+                    found=1
+                done
+                [ -n "$found" ] || die "no debug binaries in $c/target/debug (mise run compile $c); DEBUG=1 must not silently install release — use DEBUG=0 for that"
+                tgt_env=(CARGO_TARGET_DIR="$view")
+                # Recreated on every DEBUG=1 install; stale links are ruled out.
+            fi
         fi
+        # tgt_env may be empty (set -u) — ${tgt_env[@]+...} skips it then.
+        # The assignment goes through env: an expanded word like
+        # 'CARGO_TARGET_DIR=x' is a command name, not an assignment prefix.
         # dbg may hold several overrides (bin-src + applet-src) — just needs
         # them as separate args, hence unquoted (no spaces in paths here).
         if [ "$c" = pop-launcher ]; then
-            (cd "$c" && HOME=/home/dev just ${dbg} install)
+            (cd "$c" && HOME=/home/dev env ${tgt_env[@]+"${tgt_env[@]}"} just ${dbg} install)
         else
-            (cd "$c" && HOME=/home/dev just "prefix=${COSMIC_PREFIX:-/usr}" ${dbg} install)
+            (cd "$c" && HOME=/home/dev env ${tgt_env[@]+"${tgt_env[@]}"} just "prefix=${COSMIC_PREFIX:-/usr}" ${dbg} install)
         fi
         ;;
     just-data)
